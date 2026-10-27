@@ -3,6 +3,9 @@ on:
   workflow_dispatch:
   push:
     branches: [main, master]
+env:
+  APP_VERSION: "1.1.0"
+  VERSION_CODE: "2"
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -10,6 +13,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: unzip -q ihr-app.zip
+      - run: |
+          jq --arg v "$APP_VERSION" --argjson c "$VERSION_CODE" '.expo.version=$v | .expo.android.versionCode=$c' app.json > app.tmp && mv app.tmp app.json
+          sed -i "s/versi 1\.1\.0/versi $APP_VERSION/" src/screens/ProfileScreen.js
+        working-directory: ihr-app
       - uses: actions/setup-node@v4
         with: { node-version: 20 }
       - uses: actions/setup-java@v4
