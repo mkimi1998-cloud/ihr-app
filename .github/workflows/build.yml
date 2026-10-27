@@ -14,6 +14,8 @@ jobs:
         with: { node-version: 20 }
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 17 }
+      - run: npm pkg set dependencies.expo-font="~12.0.10"
+        working-directory: ihr-app
       - run: npm install
         working-directory: ihr-app
       - run: npx expo install --fix
