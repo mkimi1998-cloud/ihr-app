@@ -1236,9 +1236,9 @@ jobs:
                         var diffText = cells.length > 4 ? cells[4].innerText.trim() : '';
                         var notesText = cells.length > 5 ? cells[5].innerText.trim() : '';
                         
-                        if (/\\d+[-/\\.]\\d+[-/\\.]\\d+/.test(dateText)) {
-                          var inMatch = /(\\d{1,2}:\\d{2}\\s*(?:AM|PM)?)/i.exec(inText);
-                          var outMatch = /(\\d{1,2}:\\d{2}\\s*(?:AM|PM)?)/i.exec(outText);
+                        if (/\d+[-/\.]\d+[-/\.]\d+/.test(dateText)) {
+                          var inMatch = /(\d{1,2}:\d{2}\s*(?:AM|PM)?)/i.exec(inText);
+                          var outMatch = /(\d{1,2}:\d{2}\s*(?:AM|PM)?)/i.exec(outText);
                           results.push({
                             date: dateText,
                             day: dayText,
