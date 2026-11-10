@@ -141,7 +141,10 @@ jobs:
           const parseVersionParts = (v) => {
             if (!v) return [0, 0, 0, 0];
             const clean = String(v).replace(/^[vV]/, '').trim();
-            const nums = clean.split(/[-.+_]/).map((n) => parseInt(n, 10) || 0);
+            // Ambil semua nombor berturutan (cth: "1.0.9-20" -> [1, 0, 9, 20])
+            const matched = clean.match(/\d+/g);
+            if (!matched) return [0, 0, 0, 0];
+            const nums = matched.map((n) => parseInt(n, 10) || 0);
             while (nums.length < 4) nums.push(0);
             return nums;
           };
@@ -1690,15 +1693,24 @@ jobs:
               setCheckingUpdate(true);
               try {
                 const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, {
-                  headers: { 'Accept': 'application/vnd.github.v3+json' },
+                  headers: { 
+                    'Accept': 'application/vnd.github.v3+json',
+                    'User-Agent': 'iHR-App-Updater' // Wajib untuk elak sekatan 403 GitHub API
+                  },
                 });
+
                 if (!res.ok) {
-                  if (manual) Alert.alert('Kemas Kini', 'Tiada maklumat kemas kini ditemui pada masa ini.');
+                  if (manual) Alert.alert('Kemas Kini', `Ralat pelayan GitHub (HTTP ${res.status}). Sila cuba sebentar lagi.`);
                   return;
                 }
+
                 const release = await res.json();
                 const latestTag = release.tag_name || release.name || '';
-                const currentVer = `${Application.nativeApplicationVersion || '1.0.9'}-${Application.nativeBuildVersion || '9'}`;
+                
+                // Dapatkan versi aplikasi semasa yang dipasang
+                const appVer = Application.nativeApplicationVersion || '1.0.8';
+                const buildVer = Application.nativeBuildVersion || '8';
+                const currentVer = `${appVer}-${buildVer}`;
                 
                 const apkAsset = (release.assets || []).find((a) => a.name && a.name.toLowerCase().endsWith('.apk'));
                 const downloadUrl = apkAsset ? apkAsset.browser_download_url : release.html_url;
@@ -1711,10 +1723,10 @@ jobs:
                     downloadUrl: downloadUrl,
                   });
                 } else if (manual) {
-                  Alert.alert('Versi Terkini', `Aplikasi anda adalah versi terkini (${currentVer}).`);
+                  Alert.alert('Versi Terkini', `Aplikasi anda adalah versi terkini (${currentVer}) berbanding pelayan (${latestTag}).`);
                 }
               } catch (e) {
-                if (manual) Alert.alert('Ralat', 'Gagal menyemak kemas kini. Sila pastikan sambungan internet anda aktif.');
+                if (manual) Alert.alert('Ralat', `Gagal menyemak kemas kini: ${e.message}`);
               } finally {
                 setCheckingUpdate(false);
               }
