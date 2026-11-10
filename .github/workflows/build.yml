@@ -32,7 +32,7 @@ jobs:
           cat > 'package.json' <<'IHR_EOF'
           {
             "name": "ihr",
-            "version": "1.0.9",
+            "version": "1.1.0",
             "main": "node_modules/expo/AppEntry.js",
             "scripts": { "start": "expo start", "android": "expo run:android" },
             "dependencies": {
@@ -63,7 +63,7 @@ jobs:
             "expo": {
               "name": "iHR",
               "slug": "iHr",
-              "version": "1.0.9",
+              "version": "1.1.0",
               "orientation": "portrait",
               "userInterfaceStyle": "automatic",
               "icon": "./assets/icon.png",
@@ -653,15 +653,20 @@ jobs:
           const WeeklySummaryCard = ({ tags = [], todayFirst = null, todayLast = null }) => {
             const { C, s } = useT();
             const [selectedDay, setSelectedDay] = useState(null);
-            const [showAllModal, setShowAllModal] = useState(false);
+            const [showMonthModal, setShowMonthModal] = useState(false);
             const [serverRows, setServerRows] = useState([]);
-            const [dropdownOpen, setDropdownOpen] = useState(false);
-            
+
             const today = new Date();
             const currentYear = today.getFullYear();
             const currentMonth = today.getMonth();
-            const [monthSel, setMonthSel] = useState(`${currentYear}-${currentMonth}`);
-            
+
+            const monthNames = [
+              'Januari', 'Februari', 'Mac', 'April', 'Mei', 'Jun',
+              'Julai', 'Ogos', 'September', 'Oktober', 'November', 'Disember'
+            ];
+            const dayNames = ['Ahd', 'Isn', 'Sel', 'Rab', 'Kha', 'Jum', 'Sab'];
+            const fullDayNames = ['Ahad', 'Isnin', 'Selasa', 'Rabu', 'Khamis', 'Jumaat', 'Sabtu'];
+
             useEffect(() => {
               const fetchServerData = async () => {
                 try {
@@ -675,28 +680,29 @@ jobs:
                 } catch (_) {}
               };
               fetchServerData();
-              const timer = setInterval(fetchServerData, 30000);
+              const timer = setInterval(fetchServerData, 20000);
               return () => clearInterval(timer);
             }, []);
 
-            const dayNames = ['Ahd', 'Isn', 'Sel', 'Rab', 'Kha', 'Jum', 'Sab'];
-            const fullDayNames = ['Ahad', 'Isnin', 'Selasa', 'Rabu', 'Khamis', 'Jumaat', 'Sabtu'];
-            const currentDayOfWeek = today.getDay();
-            const sunday = new Date(today);
-            sunday.setDate(today.getDate() - currentDayOfWeek);
-            
-            const weekDays = [];
-            let tepatCount = 0;
-            let lewatCount = 0;
-            let tiadaCount = 0;
+            const parseTimeStr = (str) => {
+              if (!str || str === '—' || str === '-') return null;
+              const m = /(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)?/i.exec(String(str).trim());
+              if (!m) return null;
+              let hr = +m[1];
+              const mn = +m[2];
+              const ampm = m[3] ? m[3].toUpperCase() : null;
+              if (ampm === 'PM' && hr < 12) hr += 12;
+              if (ampm === 'AM' && hr === 12) hr = 0;
+              return { hr, mn, totalMins: hr * 60 + mn };
+            };
 
             const buildDay = (d) => {
-              const i = d.getDay();
+              const dayIdx = d.getDay();
               const isToday = d.toDateString() === today.toDateString();
               const isPast = d <= today;
-              const isWeekend = (i === 0 || i === 6);
-              const dateFormatted = `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`;
-              
+              const isWeekend = dayIdx === 0 || dayIdx === 6;
+              const dateFormatted = `${d.getDate()} ${monthNames[d.getMonth()].slice(0, 3)} ${d.getFullYear()}`;
+
               let hours = 0;
               let status = 'tiada';
               let inTime = '—';
@@ -705,36 +711,42 @@ jobs:
               let hasServerMatch = false;
 
               if (serverRows.length > 0) {
-                const matched = serverRows.find(r => {
-                  const parts = String(r.date || '').split(/[-/]/);
+                const matched = serverRows.find((r) => {
+                  const parts = String(r.date || '').trim().split(/[-/.]/);
                   if (parts.length === 3) {
-                    return +parts[0] === d.getDate() && +parts[1] === (d.getMonth() + 1) && +parts[2] === d.getFullYear();
+                    let rD = 0, rM = 0, rY = 0;
+                    if (parts[0].length === 4) {
+                      rY = +parts[0]; rM = +parts[1]; rD = +parts[2];
+                    } else {
+                      rD = +parts[0]; rM = +parts[1]; rY = +parts[2];
+                    }
+                    return rD === d.getDate() && rM === (d.getMonth() + 1) && rY === d.getFullYear();
                   }
                   return false;
                 });
+
                 if (matched) {
                   hasServerMatch = true;
                   inTime = matched.clockIn ? matched.clockIn : (isToday && todayFirst ? todayFirst : '—');
                   outTime = matched.clockOut ? matched.clockOut : (isToday && todayLast ? todayLast : '—');
                   notes = matched.notes || '';
+
                   if (inTime !== '—') {
-                    const mIn = /(\d{1,2}):(\d{2})\s*(AM|PM)?/i.exec(inTime);
-                    let hrIn = 0, mnIn = 0;
-                    if (mIn) {
-                      hrIn = (+mIn[1] % 12) + (/pm/i.test(mIn[3] || '') ? 12 : 0);
-                      mnIn = +mIn[2];
+                    const parsedIn = parseTimeStr(inTime);
+                    if (parsedIn) {
+                      const isLate = parsedIn.hr > 9 || (parsedIn.hr === 9 && parsedIn.mn > 0);
+                      status = isLate ? 'lewat' : 'tepat';
+                    } else {
+                      status = 'tepat';
                     }
-                    const isLate = hrIn > 9 || (hrIn === 9 && mnIn > 0);
-                    status = isLate ? 'lewat' : 'tepat';
+
                     if (outTime !== '—') {
-                      const mOut = /(\d{1,2}):(\d{2})\s*(AM|PM)?/i.exec(outTime);
-                      if (mIn && mOut) {
-                        const hrOut = (+mOut[1] % 12) + (/pm/i.test(mOut[3] || '') ? 12 : 0);
-                        const mnOut = +mOut[2];
-                        const diffMins = (hrOut * 60 + mnOut) - (hrIn * 60 + mnIn);
+                      const parsedOut = parseTimeStr(outTime);
+                      if (parsedIn && parsedOut) {
+                        const diffMins = parsedOut.totalMins - parsedIn.totalMins;
                         hours = diffMins > 0 ? parseFloat((diffMins / 60).toFixed(1)) : 8.0;
                       } else {
-                        hours = 8.5;
+                        hours = 8.0;
                       }
                     } else {
                       hours = isToday ? 8.0 : 8.0;
@@ -751,181 +763,225 @@ jobs:
                 }
               }
 
-              if (!hasServerMatch) {
-                if (isToday) {
-                  if (todayFirst) {
-                    inTime = todayFirst;
-                    outTime = todayLast || todayFirst;
-                    status = 'tepat';
-                    hours = 8.0;
-                    
-                    const m = /(\d{1,2}):(\d{2})\s*(AM|PM)/i.exec(String(todayFirst));
-                    if (m) {
-                      const hr = (+m[1] % 12) + (/pm/i.test(m[3]) ? 12 : 0);
-                      const mn = +m[2];
-                      if (hr > 9 || (hr === 9 && mn > 0)) {
-                        status = 'lewat';
-                      }
-                    }
-                    if (todayLast && todayLast !== todayFirst) {
-                      const mOut = /(\d{1,2}):(\d{2})\s*(AM|PM)/i.exec(String(todayLast));
-                      if (m && mOut) {
-                        const hIn = (+m[1] % 12) + (/pm/i.test(m[3]) ? 12 : 0) + (+m[2] / 60);
-                        const hOut = (+mOut[1] % 12) + (/pm/i.test(mOut[3]) ? 12 : 0) + (+mOut[2] / 60);
-                        if (hOut > hIn) {
-                          hours = parseFloat((hOut - hIn).toFixed(1));
-                        } else {
-                          hours = 8.5;
-                        }
-                      } else {
-                        hours = 8.5;
-                      }
-                    }
-                  } else {
-                    status = 'tiada';
+              if (!hasServerMatch && isToday && todayFirst) {
+                inTime = todayFirst;
+                outTime = todayLast || todayFirst;
+                status = 'tepat';
+                hours = 8.0;
+
+                const parsedIn = parseTimeStr(todayFirst);
+                if (parsedIn && (parsedIn.hr > 9 || (parsedIn.hr === 9 && parsedIn.mn > 0))) {
+                  status = 'lewat';
+                }
+
+                if (todayLast && todayLast !== todayFirst) {
+                  const parsedOut = parseTimeStr(todayLast);
+                  if (parsedIn && parsedOut) {
+                    const diffMins = parsedOut.totalMins - parsedIn.totalMins;
+                    hours = diffMins > 0 ? parseFloat((diffMins / 60).toFixed(1)) : 8.0;
                   }
-                } else if (isPast && !isWeekend) {
-                  status = 'tiada';
-                  hours = 0;
-                } else if (isWeekend) {
-                  status = 'tiada';
-                  hours = 0;
                 }
               }
 
               return {
-                dayLabel: dayNames[i],
-                fullDay: fullDayNames[i],
+                dayLabel: dayNames[dayIdx],
+                fullDay: fullDayNames[dayIdx],
                 dateStr: dateFormatted,
-                hours: hours,
-                status: status,
-                inTime: inTime,
-                outTime: outTime,
-                notes: notes,
-                isToday: isToday,
+                dayNumber: d.getDate(),
+                hours,
+                status,
+                inTime,
+                outTime,
+                notes,
+                isToday,
                 synced: hasServerMatch,
               };
             };
 
+            const currentDayOfWeek = today.getDay();
+            const startOfWeek = new Date(today);
+            startOfWeek.setDate(today.getDate() - currentDayOfWeek);
+
+            const weekDays = [];
+            let tepatCount = 0;
+            let lewatCount = 0;
+            let tiadaCount = 0;
+            let totalWeekHours = 0;
+
             for (let i = 0; i < 7; i++) {
-              const d = new Date(sunday);
-              d.setDate(sunday.getDate() + i);
+              const d = new Date(startOfWeek);
+              d.setDate(startOfWeek.getDate() + i);
               const item = buildDay(d);
               if (item.status === 'tepat') tepatCount++;
               else if (item.status === 'lewat') lewatCount++;
               else tiadaCount++;
+
+              if (item.hours > 0) totalWeekHours += item.hours;
               weekDays.push(item);
             }
 
-            const monthNames = ['Januari', 'Februari', 'Mac', 'April', 'Mei', 'Jun', 'Julai', 'Ogos', 'September', 'Oktober', 'November', 'Disember'];
-            
-            const monthSet = new Set();
-            for (let b = 0; b < 12; b++) {
-              const pastD = new Date(currentYear, currentMonth - b, 1);
-              monthSet.add(`${pastD.getFullYear()}-${pastD.getMonth()}`);
-            }
-            serverRows.forEach((r) => {
-              const pp = String(r.date || '').split(/[-/.]/);
-              if (pp.length === 3 && +pp[1] >= 1 && +pp[1] <= 12 && +pp[2] > 1000) {
-                monthSet.add(`${+pp[2]}-${+pp[1] - 1}`);
-              }
-            });
+            const daysInCurrentMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+            const currentMonthDays = [];
+            let mMonthTepat = 0, mMonthLewat = 0, mMonthTiada = 0;
 
-            const monthList = [...monthSet].map((k) => {
-              const [yy, mm] = k.split('-').map(Number);
-              return { k, y: yy, m: mm, label: `Bulan ${mm + 1} (${monthNames[mm]} ${yy})` };
-            }).sort((a, b) => (b.y - a.y) || (b.m - a.m));
-
-            const [sy, sm] = (monthSel || `${currentYear}-${currentMonth}`).split('-').map(Number);
-            const totalDaysInMonth = new Date(sy, sm + 1, 0).getDate();
-            const modalDays = [];
-            for (let dd = totalDaysInMonth; dd >= 1; dd--) {
-              modalDays.push(buildDay(new Date(sy, sm, dd, 12, 0, 0)));
+            for (let dayNum = daysInCurrentMonth; dayNum >= 1; dayNum--) {
+              const item = buildDay(new Date(currentYear, currentMonth, dayNum, 12, 0, 0));
+              if (item.status === 'tepat') mMonthTepat++;
+              else if (item.status === 'lewat') mMonthLewat++;
+              else mMonthTiada++;
+              currentMonthDays.push(item);
             }
 
-            const selectedMonthObj = monthList.find(item => item.k === monthSel) || monthList[0];
-            const modalTitle = `Jadual Bulan ${sm + 1} (${monthNames[sm]} ${sy})`;
-
-            let mdTepat = 0, mdLewat = 0, mdTiada = 0;
-            modalDays.forEach((x) => {
-              if (x.status === 'tepat') mdTepat++;
-              else if (x.status === 'lewat') mdLewat++;
-              else mdTiada++;
-            });
-
-            const maxH = Math.max(...weekDays.map(w => w.hours), 9.0);
+            const maxBarHeight = 85;
+            const maxVal = Math.max(...weekDays.map((w) => w.hours), 9.0);
+            const avgHours = (totalWeekHours / (tepatCount + lewatCount || 1)).toFixed(1);
 
             return (
               <View style={{
                 backgroundColor: C.card,
-                borderRadius: 22,
+                borderRadius: 24,
                 padding: 18,
                 borderWidth: 1,
                 borderColor: C.line,
-                elevation: 2,
+                elevation: 3,
                 shadowColor: '#000',
-                shadowOpacity: 0.05,
-                shadowRadius: 8,
+                shadowOpacity: 0.06,
+                shadowRadius: 10,
               }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                  <Pressable onPress={() => setShowAllModal(true)} hitSlop={8} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Text style={{ fontSize: 18, fontWeight: '800', color: C.ink }}>Ringkasan 7 hari</Text>
-                    <MaterialIcons name="grid-view" size={17} color={C.primary} />
-                  </Pressable>
-                  <Pressable onPress={() => setShowAllModal(true)} style={{ backgroundColor: '#E8F5E9', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 }}>
-                    <Text style={{ color: '#2E7D4F', fontWeight: '800', fontSize: 12 }}>
-                      {`${tepatCount} TEPAT`}
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+                  <Pressable onPress={() => setShowMonthModal(true)} hitSlop={8} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={{ fontSize: 18, fontWeight: '800', color: C.ink, letterSpacing: -0.3 }}>
+                      Prestasi 7 Hari
                     </Text>
+                    <View style={{ backgroundColor: C.primarySoft || '#F8E5E1', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 8 }}>
+                      <Text style={{ fontSize: 11, fontWeight: '800', color: C.primary }}>Live</Text>
+                    </View>
+                  </Pressable>
+
+                  <Pressable
+                    onPress={() => setShowMonthModal(true)}
+                    style={({ pressed }) => [{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      backgroundColor: C.field,
+                      paddingHorizontal: 11,
+                      paddingVertical: 6,
+                      borderRadius: 14,
+                      borderWidth: 1,
+                      borderColor: C.line,
+                      gap: 4,
+                    }, pressed && { opacity: 0.7 }]}
+                  >
+                    <MaterialIcons name="calendar-today" size={14} color={C.primary} />
+                    <Text style={{ color: C.ink, fontWeight: '700', fontSize: 12 }}>
+                      {`${monthNames[currentMonth]} ${currentYear}`}
+                    </Text>
+                    <MaterialIcons name="chevron-right" size={16} color={C.mute} />
                   </Pressable>
                 </View>
-                <View style={{ flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', height: 130, paddingTop: 16 }}>
+
+                <View style={{
+                  flexDirection: 'row',
+                  alignItems: 'flex-end',
+                  justifyContent: 'space-between',
+                  height: 145,
+                  paddingTop: 10,
+                  paddingHorizontal: 2,
+                }}>
                   {weekDays.map((item, idx) => {
-                    const barHeight = item.hours > 0 ? Math.max((item.hours / maxH) * 85, 20) : 8;
-                    const barColor = item.status === 'tepat' ? C.primary : item.status === 'lewat' ? '#D97706' : (C.line || '#E0E0E0');
+                    const fillPercent = item.hours > 0 ? Math.min(item.hours / maxVal, 1.0) : 0;
+                    const barFillHeight = item.hours > 0 ? Math.max(fillPercent * maxBarHeight, 18) : 0;
+                    const barColor = item.status === 'tepat' ? C.primary : item.status === 'lewat' ? '#D97706' : 'transparent';
+
                     return (
-                      <Pressable 
-                        key={idx} 
+                      <Pressable
+                        key={idx}
                         onPress={() => setSelectedDay(item)}
-                        style={({ pressed }) => [{ alignItems: 'center', flex: 1 }, pressed && { opacity: 0.6 }]}
+                        style={({ pressed }) => [{
+                          alignItems: 'center',
+                          flex: 1,
+                        }, pressed && { opacity: 0.6 }]}
                       >
-                        <Text style={{ fontSize: 11, fontWeight: '700', color: item.hours > 0 ? C.ink : 'transparent', marginBottom: 6 }}>
-                          {item.hours > 0 ? item.hours.toFixed(1) : '-'}
+                        <Text style={{
+                          fontSize: 10,
+                          fontWeight: '800',
+                          color: item.hours > 0 ? C.ink : 'transparent',
+                          marginBottom: 6,
+                        }}>
+                          {item.hours > 0 ? `${item.hours}j` : '-'}
                         </Text>
+
                         <View style={{
-                          width: 32,
-                          height: barHeight,
-                          backgroundColor: barColor,
-                          borderRadius: 8,
-                        }} />
-                        <Text style={{ fontSize: 12, fontWeight: item.isToday ? '800' : '600', color: item.isToday ? C.primary : C.mute, marginTop: 8 }}>
-                          {item.dayLabel}
-                        </Text>
+                          width: 34,
+                          height: maxBarHeight,
+                          backgroundColor: item.isToday ? (C.primarySoft || '#F8E5E1') : C.field,
+                          borderRadius: 12,
+                          justifyContent: 'flex-end',
+                          alignItems: 'center',
+                          borderWidth: item.isToday ? 1.5 : 1,
+                          borderColor: item.isToday ? C.primary : C.line,
+                          overflow: 'hidden',
+                          padding: 2,
+                        }}>
+                          {barFillHeight > 0 ? (
+                            <View style={{
+                              width: '100%',
+                              height: barFillHeight,
+                              backgroundColor: barColor,
+                              borderRadius: 10,
+                            }} />
+                          ) : (
+                            <View style={{
+                              width: 6,
+                              height: 6,
+                              borderRadius: 3,
+                              backgroundColor: C.line,
+                              marginBottom: 6,
+                            }} />
+                          )}
+                        </View>
+
+                        <View style={{ alignItems: 'center', marginTop: 8 }}>
+                          <Text style={{
+                            fontSize: 11,
+                            fontWeight: item.isToday ? '800' : '600',
+                            color: item.isToday ? C.primary : C.ink,
+                          }}>
+                            {item.dayLabel}
+                          </Text>
+                          <Text style={{
+                            fontSize: 9,
+                            color: item.isToday ? C.primary : C.mute,
+                            fontWeight: item.isToday ? '800' : '500',
+                            marginTop: 1,
+                          }}>
+                            {item.dayNumber}
+                          </Text>
+                        </View>
                       </Pressable>
                     );
                   })}
                 </View>
-                <View style={{ height: 1, backgroundColor: C.line, marginVertical: 14, opacity: 0.7 }} />
-                <Pressable onPress={() => setShowAllModal(true)} style={{ flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center' }}>
-                  <View style={{ alignItems: 'center' }}>
-                    <Text style={{ fontSize: 22, fontWeight: '800', color: '#2E7D4F' }}>{tepatCount}</Text>
-                    <Text style={{ fontSize: 12, color: C.mute, marginTop: 3, fontWeight: '600' }}>Tepat masa</Text>
+
+                <View style={{ height: 1, backgroundColor: C.line, marginVertical: 14, opacity: 0.6 }} />
+
+                <Pressable onPress={() => setShowMonthModal(true)} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 6 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: C.primary }} />
+                    <Text style={{ fontSize: 13, fontWeight: '800', color: C.ink }}>{tepatCount} <Text style={{ fontSize: 11, fontWeight: '600', color: C.mute }}>Tepat</Text></Text>
                   </View>
-                  <View style={{ alignItems: 'center' }}>
-                    <Text style={{ fontSize: 22, fontWeight: '800', color: '#D97706' }}>{lewatCount}</Text>
-                    <Text style={{ fontSize: 12, color: C.mute, marginTop: 3, fontWeight: '600' }}>Lewat</Text>
+
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#D97706' }} />
+                    <Text style={{ fontSize: 13, fontWeight: '800', color: '#D97706' }}>{lewatCount} <Text style={{ fontSize: 11, fontWeight: '600', color: C.mute }}>Lewat</Text></Text>
                   </View>
-                  <View style={{ alignItems: 'center' }}>
-                    <Text style={{ fontSize: 22, fontWeight: '800', color: C.mute }}>{tiadaCount}</Text>
-                    <Text style={{ fontSize: 12, color: C.mute, marginTop: 3, fontWeight: '600' }}>Tiada rekod</Text>
+
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <MaterialIcons name="timelapse" size={14} color={C.primary} />
+                    <Text style={{ fontSize: 13, fontWeight: '800', color: C.ink }}>{avgHours}j <Text style={{ fontSize: 11, fontWeight: '600', color: C.mute }}>Purata</Text></Text>
                   </View>
                 </Pressable>
-                <View style={{ alignItems: 'center', marginTop: 10 }}>
-                  <Text style={{ fontSize: 10, color: C.mute, fontStyle: 'italic' }}>
-                    {serverRows.length > 0 ? '✓ Diselaraskan dengan Portal Pelayan MTIB' : '* Buka tab Sejarah untuk selaraskan rekod rasmi portal'}
-                  </Text>
-                </View>
 
-                {/* MODAL 1: Butiran Satu Hari */}
                 <Modal visible={!!selectedDay} transparent animationType="fade" onRequestClose={() => setSelectedDay(null)}>
                   <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
                     <View style={{
@@ -933,7 +989,7 @@ jobs:
                       borderRadius: 24,
                       width: '100%',
                       maxWidth: 360,
-                      padding: 20,
+                      padding: 22,
                       borderWidth: 1.5,
                       borderColor: C.line,
                       shadowColor: '#000',
@@ -948,8 +1004,8 @@ jobs:
                         </View>
                         <View style={{
                           paddingHorizontal: 12,
-                          paddingVertical: 6,
-                          borderRadius: 14,
+                          paddingVertical: 5,
+                          borderRadius: 12,
                           backgroundColor: selectedDay?.status === 'tepat' ? '#E8F5E9' : selectedDay?.status === 'lewat' ? '#FEF3C7' : C.field,
                           borderWidth: 1,
                           borderColor: selectedDay?.status === 'tepat' ? '#A7F3D0' : selectedDay?.status === 'lewat' ? '#FDE68A' : C.line
@@ -963,6 +1019,7 @@ jobs:
                           </Text>
                         </View>
                       </View>
+
                       <View style={{ flexDirection: 'row', gap: 12, marginVertical: 18 }}>
                         <View style={{
                           flex: 1,
@@ -977,8 +1034,9 @@ jobs:
                             <MaterialIcons name="login" size={16} color="#2E7D4F" />
                             <Text style={{ fontSize: 11, fontWeight: '700', color: C.mute, textTransform: 'uppercase' }}>Masuk</Text>
                           </View>
-                          <Text style={{ fontSize: 17, fontWeight: '800', color: C.ink }}>{selectedDay?.inTime}</Text>
+                          <Text style={{ fontSize: 16, fontWeight: '800', color: C.ink }}>{selectedDay?.inTime}</Text>
                         </View>
+
                         <View style={{
                           flex: 1,
                           backgroundColor: C.field,
@@ -989,12 +1047,13 @@ jobs:
                           alignItems: 'center'
                         }}>
                           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                            <MaterialIcons name="logout" size={16} color="#C4513A" />
+                            <MaterialIcons name="logout" size={16} color={C.primary} />
                             <Text style={{ fontSize: 11, fontWeight: '700', color: C.mute, textTransform: 'uppercase' }}>Keluar</Text>
                           </View>
-                          <Text style={{ fontSize: 17, fontWeight: '800', color: C.ink }}>{selectedDay?.outTime}</Text>
+                          <Text style={{ fontSize: 16, fontWeight: '800', color: C.ink }}>{selectedDay?.outTime}</Text>
                         </View>
                       </View>
+
                       <View style={{
                         backgroundColor: C.primarySoft || '#F8E5E1',
                         borderRadius: 16,
@@ -1007,22 +1066,22 @@ jobs:
                         borderColor: (C.line || '#E0D0CC') + '80'
                       }}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                          <MaterialIcons name="schedule" size={20} color={C.primary} />
+                          <MaterialIcons name="schedule" size={18} color={C.primary} />
                           <Text style={{ fontSize: 13, fontWeight: '700', color: C.ink }}>
-                            {selectedDay?.notes ? selectedDay.notes : 'Jumlah Jam Bekerja'}
+                            {selectedDay?.notes ? selectedDay.notes : 'Tempoh Bekerja'}
                           </Text>
                         </View>
                         <Text style={{ fontSize: 15, fontWeight: '800', color: C.primary }}>
                           {selectedDay?.hours > 0 ? `${selectedDay.hours} Jam` : '—'}
                         </Text>
                       </View>
+
                       <Btn label="Tutup" onPress={() => setSelectedDay(null)} />
                     </View>
                   </View>
                 </Modal>
 
-                {/* MODAL 2: Jadual Mengikut Bulan Pilihan */}
-                <Modal visible={showAllModal} transparent animationType="slide" onRequestClose={() => { setShowAllModal(false); setDropdownOpen(false); }}>
+                <Modal visible={showMonthModal} transparent animationType="slide" onRequestClose={() => setShowMonthModal(false)}>
                   <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'flex-end' }}>
                     <View style={{
                       backgroundColor: C.card,
@@ -1038,98 +1097,21 @@ jobs:
                       elevation: 10,
                     }}>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                        <View style={{ flex: 1 }}>
-                          <Text style={{ fontSize: 19, fontWeight: '800', color: C.ink }}>{modalTitle}</Text>
-                          <Text style={{ fontSize: 12, color: C.mute, marginTop: 2 }}>{`${totalDaysInMonth} hari · ${mdTepat} tepat · ${mdLewat} lewat · ${mdTiada} tiada rekod`}</Text>
+                        <View>
+                          <Text style={{ fontSize: 19, fontWeight: '800', color: C.ink }}>
+                            Rekod {monthNames[currentMonth]} {currentYear}
+                          </Text>
+                          <Text style={{ fontSize: 12, color: C.mute, marginTop: 2 }}>
+                            {`${daysInCurrentMonth} hari · ${mMonthTepat} tepat · ${mMonthLewat} lewat`}
+                          </Text>
                         </View>
-                        <Pressable onPress={() => { setShowAllModal(false); setDropdownOpen(false); }} style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: C.field, alignItems: 'center', justifyContent: 'center' }}>
+                        <Pressable onPress={() => setShowMonthModal(false)} style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: C.field, alignItems: 'center', justifyContent: 'center' }}>
                           <Text style={{ fontSize: 16, color: C.mute, fontWeight: '800' }}>✕</Text>
                         </Pressable>
                       </View>
 
-                      <View style={{ marginBottom: 12, zIndex: 10 }}>
-                        <Text style={{ fontSize: 11, fontWeight: '700', color: C.mute, textTransform: 'uppercase', marginBottom: 4 }}>
-                          Pilih Bulan Rekod:
-                        </Text>
-                        <Pressable
-                          onPress={() => setDropdownOpen(!dropdownOpen)}
-                          style={{
-                            flexDirection: 'row',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            backgroundColor: C.field,
-                            borderRadius: 14,
-                            paddingHorizontal: 14,
-                            paddingVertical: 12,
-                            borderWidth: 1.5,
-                            borderColor: dropdownOpen ? C.primary : C.line
-                          }}
-                        >
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                            <MaterialIcons name="calendar-month" size={20} color={C.primary} />
-                            <Text style={{ fontSize: 14, fontWeight: '800', color: C.ink }}>
-                              {selectedMonthObj ? selectedMonthObj.label : 'Pilih Bulan'}
-                            </Text>
-                          </View>
-                          <MaterialIcons name={dropdownOpen ? "expand-less" : "expand-more"} size={22} color={C.ink} />
-                        </Pressable>
-
-                        {dropdownOpen && (
-                          <View style={{
-                            backgroundColor: C.card,
-                            borderRadius: 16,
-                            marginTop: 6,
-                            borderWidth: 1.5,
-                            borderColor: C.line,
-                            maxHeight: 180,
-                            shadowColor: '#000',
-                            shadowOpacity: 0.15,
-                            shadowRadius: 10,
-                            elevation: 8,
-                            overflow: 'hidden'
-                          }}>
-                            <ScrollView nestedScrollEnabled showsVerticalScrollIndicator={true}>
-                              {monthList.map((c, idx) => {
-                                const on = monthSel === c.k;
-                                return (
-                                  <Pressable
-                                    key={c.k}
-                                    onPress={() => {
-                                      setMonthSel(c.k);
-                                      setDropdownOpen(false);
-                                    }}
-                                    style={{
-                                      flexDirection: 'row',
-                                      alignItems: 'center',
-                                      justifyContent: 'space-between',
-                                      paddingHorizontal: 16,
-                                      paddingVertical: 12,
-                                      borderBottomWidth: idx === monthList.length - 1 ? 0 : 1,
-                                      borderBottomColor: C.line,
-                                      backgroundColor: on ? (C.primarySoft || '#F8E5E1') : 'transparent'
-                                    }}
-                                  >
-                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                                      <MaterialIcons
-                                        name="event"
-                                        size={18}
-                                        color={on ? C.primary : C.mute}
-                                      />
-                                      <Text style={{ fontSize: 13, fontWeight: on ? '800' : '600', color: on ? C.primary : C.ink }}>
-                                        {c.label}
-                                      </Text>
-                                    </View>
-                                    {on && <MaterialIcons name="check" size={18} color={C.primary} />}
-                                  </Pressable>
-                                );
-                              })}
-                            </ScrollView>
-                          </View>
-                        )}
-                      </View>
-
-                      <ScrollView style={{ marginVertical: 4 }} showsVerticalScrollIndicator={false}>
-                        {modalDays.map((w, idx) => {
+                      <ScrollView style={{ marginVertical: 6 }} showsVerticalScrollIndicator={false}>
+                        {currentMonthDays.map((w, idx) => {
                           const isTepat = w.status === 'tepat';
                           const isLewat = w.status === 'lewat';
                           return (
@@ -1142,7 +1124,7 @@ jobs:
                               borderRadius: 16,
                               marginBottom: 8,
                               borderWidth: 1,
-                              borderColor: w.isToday ? C.primary : C.line
+                              borderColor: w.isToday ? C.primary : C.line,
                             }}>
                               <View style={{ width: 85 }}>
                                 <Text style={{ fontSize: 14, fontWeight: '800', color: C.ink }}>{w.fullDay}</Text>
@@ -1153,22 +1135,22 @@ jobs:
                                   {w.inTime} - {w.outTime}
                                 </Text>
                                 <Text style={{ fontSize: 10, color: C.mute, marginTop: 1, textAlign: 'center' }}>
-                                  {w.hours > 0 ? `${w.hours} jam` : (w.notes || (w.synced || w.isToday ? 'Tiada masa' : 'Belum diselaraskan'))}
+                                  {w.hours > 0 ? `${w.hours} jam` : (w.notes || (w.synced || w.isToday ? 'Tiada masa' : 'Belum disegerakkan'))}
                                 </Text>
                               </View>
                               <View style={{
-                                width: 75,
+                                width: 72,
                                 paddingVertical: 4,
                                 borderRadius: 10,
                                 backgroundColor: isTepat ? '#E8F5E9' : isLewat ? '#FEF3C7' : C.card,
                                 borderWidth: 1,
                                 borderColor: isTepat ? '#A7F3D0' : isLewat ? '#FDE68A' : C.line,
-                                alignItems: 'center'
+                                alignItems: 'center',
                               }}>
                                 <Text style={{
                                   fontSize: 10,
                                   fontWeight: '800',
-                                  color: isTepat ? '#2E7D4F' : isLewat ? '#D97706' : C.mute
+                                  color: isTepat ? '#2E7D4F' : isLewat ? '#D97706' : C.mute,
                                 }}>
                                   {isTepat ? 'TEPAT' : isLewat ? 'LEWAT' : 'TIADA'}
                                 </Text>
@@ -1177,8 +1159,9 @@ jobs:
                           );
                         })}
                       </ScrollView>
+
                       <View style={{ marginTop: 10 }}>
-                        <Btn label="Tutup Jadual" onPress={() => { setShowAllModal(false); setDropdownOpen(false); }} />
+                        <Btn label="Tutup Rekod Bulan" onPress={() => setShowMonthModal(false)} />
                       </View>
                     </View>
                   </View>
@@ -2128,9 +2111,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: success()
         with:
-          tag_name: "v1.0.9-${{ github.run_number }}"
+          tag_name: "v1.1.0-${{ github.run_number }}"
           name: "iHR APK Build v1.0.9 #${{ github.run_number }}"
-          body: "APK iHR dibina secara automatik melalui GitHub Actions."
+          body: "Update Patch, Jadual  Ringkasan 7 Hari."
           draft: false
           prerelease: false
           files: app/android/app/build/outputs/apk/release/*.apk
