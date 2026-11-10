@@ -1,37 +1,2005 @@
-name: Build APK
+name: Build iHR APK
 on:
   workflow_dispatch:
-  push:
-    branches: [main, master]
-env:
-  APP_VERSION: "1.1.0"
-  VERSION_CODE: "2"
 jobs:
-  build:
+  apk:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
-      - run: unzip -q ihr-app.zip
-      - run: |
-          jq --arg v "$APP_VERSION" --argjson c "$VERSION_CODE" '.expo.version=$v | .expo.android.versionCode=$c' app.json > app.tmp && mv app.tmp app.json
-          sed -i "s/versi 1\.1\.0/versi $APP_VERSION/" src/screens/ProfileScreen.js
-        working-directory: ihr-app
+      - name: Create project files
+        run: |
+          set -e
+          if [ -f "$GITHUB_WORKSPACE/iHR-source.zip" ]; then
+            echo "Mengekstrak iHR-source.zip..."
+            unzip -o "$GITHUB_WORKSPACE/iHR-source.zip" -d "$GITHUB_WORKSPACE/"
+          fi
+          mkdir -p app/src
+          cd app
+          mkdir -p assets
+          for f in icon.png adaptive-icon.png; do
+            if [ -f "$GITHUB_WORKSPACE/assets/$f" ]; then
+              cp "$GITHUB_WORKSPACE/assets/$f" "assets/$f"
+            elif [ ! -f "assets/$f" ]; then
+              echo "ERROR: assets/$f tidak dijumpai dalam repo. Pastikan folder assets/ dari iHR-source.zip dimuat naik ke root repo."
+              exit 1
+            fi
+          done
+          cat > 'package.json' <<'IHR_EOF'
+          {
+            "name": "ihr",
+            "version": "1.0.8",
+            "main": "node_modules/expo/AppEntry.js",
+            "scripts": { "start": "expo start", "android": "expo run:android" },
+            "dependencies": {
+            "@react-native-community/datetimepicker": "7.7.0",
+            "expo": "~51.0.28",
+            "expo-application": "~5.9.1",
+            "expo-camera": "~15.0.16",
+            "expo-image-manipulator": "~12.0.5",
+            "expo-location": "~17.0.1",
+            "expo-secure-store": "~13.0.2",
+            "expo-status-bar": "~1.12.1",
+            "expo-system-ui": "~3.0.7",
+            "react": "18.2.0",
+            "react-native": "0.74.5",
+            "expo-barcode-scanner": "~13.0.1",
+            "expo-image-picker": "~15.0.7",
+            "react-native-webview": "13.8.6"
+          },
+            "devDependencies": { "@babel/core": "^7.24.0" },
+            "private": true
+          }
+          IHR_EOF
+          cat > 'babel.config.js' <<'IHR_EOF'
+          module.exports = function (api) { api.cache(true); return { presets: ['babel-preset-expo'] }; };
+          IHR_EOF
+          cat > 'app.json' <<'IHR_EOF'
+          {
+            "expo": {
+              "name": "iHR",
+              "slug": "iHr",
+              "version": "1.0.8",
+              "orientation": "portrait",
+              "userInterfaceStyle": "automatic",
+              "icon": "./assets/icon.png",
+              "android": {
+                "package": "my.gov.mtib.ihr.v2",
+                "versionCode": 8,
+              "adaptiveIcon": { "foregroundImage": "./assets/adaptive-icon.png", "backgroundColor": "#FFFFFF" },
+                "permissions": [
+                  "android.permission.CAMERA",
+                  "android.permission.ACCESS_COARSE_LOCATION",
+                  "android.permission.ACCESS_FINE_LOCATION"
+                ]
+              },
+              "plugins": [
+                [
+                  "expo-camera",
+                  {
+                    "cameraPermission": "Allow iHR to access the camera for QR scanning and attendance photos."
+                  }
+                ],
+                [
+                  "expo-location",
+                  {
+                    "locationWhenInUsePermission": "Allow iHR to use your location for geotagging attendance."
+                  }
+                ],
+                "expo-secure-store",
+                [
+                  "expo-image-picker",
+                  {
+                    "photosPermission": "Benarkan iHR mengakses galeri untuk memuat naik kod QR."
+                  }
+                ]
+              ],
+              "scheme": "ihr2"
+            }
+          }
+          IHR_EOF
+          cat > 'App.js' <<'IHR_EOF'
+          import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+          import { ActivityIndicator, Alert, Image, Linking, Platform, Pressable, SafeAreaView, ScrollView, StatusBar as RNBar, StyleSheet, Text, TextInput, useColorScheme, View, Switch, Modal } from 'react-native';
+          import { StatusBar } from 'expo-status-bar';
+          import * as Location from 'expo-location';
+          import * as SecureStore from 'expo-secure-store';
+          import { CameraView, useCameraPermissions } from 'expo-camera';
+          import { MaterialIcons } from '@expo/vector-icons';
+          import * as ImageManipulator from 'expo-image-manipulator';
+          import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
+          import * as ImagePicker from 'expo-image-picker';
+          import { WebView } from 'react-native-webview';
+          import { BarCodeScanner } from 'expo-barcode-scanner';
+          import { themes } from './src/theme';
+          import { EP, addLocalTag, call, clearSession, deviceId, findPhoto, getLocalTags, kerjaLuarFields, loadSession, parseReference, peek, saveDeviceId, saveSession, unwrap } from './src/api';
+          const pad = (n) => String(n).padStart(2, '0');
+          const t12 = (h, m) => `${pad(h % 12 || 12)}:${pad(m)} ${h < 12 ? 'AM' : 'PM'}`;
+          const fromServer = (v) => { const m = /(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})/.exec(String(v || '')); return m ? t12(+m[2], +m[3]) : null; };
+          const fromMs = (ms) => { const d = new Date(ms); return t12(d.getHours(), d.getMinutes()); };
+          const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+          const parseYMD = (v) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v || '').trim()); return m ? new Date(+m[1], +m[2] - 1, +m[3]) : new Date(); };
+          const toYMD = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+          const toDMY = (v) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v || '').trim()); return m ? `${m[3]}/${m[2]}/${m[1]}` : String(v || ''); };
+          const ACTS = [[1, 'Kehadiran Biasa'], [2, 'BDR'], [3, 'Kerja Luar']];
+          const PORTAL = 'https://ihr.mtib.gov.my/user/leave_attendance/attendance_record';
+          const wrapName = (n, max = 26) => {
+            const out = []; let cur = '';
+            String(n || '').trim().split(/\s+/).forEach((w) => {
+              if (cur && (cur + ' ' + w).length > max) { out.push(cur); cur = w; } else { cur = cur ? cur + ' ' + w : w; }
+            });
+            if (cur) out.push(cur);
+            return out;
+          };
+          const colorOf = (c, fb) => { const v = String(c ?? '').trim(); return /^[0-9a-f]{6}$/i.test(v) ? '#' + v : v || fb; };
+          
+          const saveTagDetails = async (method, lat, lng) => {
+            try {
+              const d = new Date();
+              const key = `TAG_DETAILS_${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+              const cur = JSON.parse((await SecureStore.getItemAsync(key)) || '[]');
+              let address = 'Sedang memproses lokasi...';
+              
+              if (lat && lng) {
+                try {
+                  const rev = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
+                  if (rev && rev.length > 0) {
+                    const r = rev[0];
+                    address = [r.name, r.street, r.city, r.subregion].filter(Boolean).join(', ');
+                  } else {
+                    address = 'Lokasi tidak dapat dikenal pasti';
+                  }
+                } catch (err) {
+                  address = 'Gagal memuat turun nama lokasi';
+                }
+              } else {
+                address = 'Koordinat GPS tidak tersedia';
+              }
+              
+              cur.push({ t: Date.now(), m: method, lat, lng, address });
+              await SecureStore.setItemAsync(key, JSON.stringify(cur));
+            } catch (e) { console.log("Ralat simpan tag details:", e); }
+          };
+          const ThemeCtx = createContext(null);
+          const useT = () => useContext(ThemeCtx);
+          
+          const Btn = ({ label, onPress, kind = 'main', busy, disabled, icon }) => {
+            const { C, s } = useT();
+            return (
+              <Pressable onPress={onPress} disabled={busy || disabled} style={({ pressed }) => [s.btn, kind === 'ghost' && s.btnGhost, (busy || disabled) && { opacity: 0.5 }, pressed && { opacity: 0.85 }]}>
+                {busy ? <ActivityIndicator color={kind === 'ghost' ? C.primaryText : C.onPrimary} /> : (
+                  <View style={s.btnIn}>{icon ? <Text style={s.btnIc}>{icon}</Text> : null}<Text style={[s.btnTx, kind === 'ghost' && { color: C.primaryText }]}>{label}</Text></View>)}
+              </Pressable>
+            );
+          };
+          const Ico = ({ g, tint, size = 34 }) => {
+            const { C } = useT(); const t = tint || C.primary;
+            return (
+              <View style={{ width: size, height: size, borderRadius: size * 0.3, backgroundColor: t + '26', alignItems: 'center', justifyContent: 'center' }}><Text style={{ fontSize: size * 0.5 }}>{g}</Text></View>
+            );
+          };
+          const Card = ({ title, icon, tint, children }) => {
+            const { s } = useT();
+            return (
+              <View style={s.card}>{title ? (<View style={s.cardH}>{icon ? <Ico g={icon} tint={tint} /> : null}<Text style={s.cardT}>{title}</Text></View>) : null}{children}</View>
+            );
+          };
+          const Row = ({ icon, k, v, tint, last, selectable, stack }) => {
+            const { s } = useT();
+            return (
+              <View style={[s.row, last && { borderBottomWidth: 0 }]}>
+                {icon ? <Ico g={icon} tint={tint} size={28} /> : null}
+                {stack ? (<View style={{ flex: 1 }}><Text style={s.rowK}>{k}</Text><Text style={[s.rowV, { textAlign: 'left', marginTop: 3, fontWeight: '700' }]} selectable={selectable}>{v}</Text></View>)
+                  : (<><Text style={s.rowK}>{k}</Text><Text style={s.rowV} selectable={selectable}>{v}</Text></>)}
+              </View>
+            );
+          };
+          const Collapse = ({ title, icon, summary, strong, warn, open, onToggle, children, tint }) => {
+            const { C, s } = useT();
+            return (
+              <View style={s.card}>
+                <Pressable onPress={onToggle} style={s.cardH} hitSlop={4}>
+                  {icon ? <Ico g={icon} tint={tint} /> : null}
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.cardT}>{title}</Text>
+                    {!open && summary ? <Text numberOfLines={1} style={{ color: warn ? C.bad : strong ? C.ink : C.mute, fontSize: 13, fontWeight: strong ? '600' : '400', marginTop: 2 }}>{summary}</Text> : null}
+                  </View>
+                  <Text style={{ color: C.mute }}>{open ? '▲' : '▼'}</Text>
+                </Pressable>
+                {open ? children : null}
+              </View>
+            );
+          };
+          
+          const Stat = ({ icon, label, value, tint, methodIcon, onPress }) => {
+            const { s } = useT();
+            return (
+              <Pressable onPress={onPress} style={({ pressed }) => [
+                s.stat, 
+                { backgroundColor: tint + '12', borderColor: tint + '30' },
+                pressed && { opacity: 0.6, backgroundColor: tint + '25' }
+              ]}>
+                <View style={s.statH}>
+                  <Ico g={icon} tint={tint} size={26} />
+                  <Text style={[s.statL, { color: tint }]}>{label}</Text>
+                </View>
+                <View style={{ marginTop: 10 }}>
+                  <Text style={[s.statV, { marginTop: 0 }]}>{value}</Text>
+                  {methodIcon ? (
+                    <View style={{ marginTop: 8, flexDirection: 'row', alignItems: 'center' }}>
+                      {typeof methodIcon === 'string' ? (
+                        <Text style={{ fontSize: 24, opacity: 0.8 }}>{methodIcon}</Text>
+                      ) : (
+                        methodIcon
+                      )}
+                    </View>
+                  ) : null}
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 14, gap: 4 }}>
+                  <MaterialIcons name="touch-app" size={14} color={tint} style={{ opacity: 0.8 }} />
+                  <Text style={{ fontSize: 10, color: tint, fontWeight: '700', opacity: 0.8 }}>Klik untuk info</Text>
+                </View>
+              </Pressable>
+            );
+          };
+          
+          const Err = ({ msg }) => { const { C, s } = useT(); return msg ? <View style={s.err}><Text style={{ color: C.bad }}>{msg}</Text></View> : null; };
+          const Ok = ({ msg }) => { const { C, s } = useT(); return msg ? <View style={s.okBox}><Text style={{ color: C.ok }}>{msg}</Text></View> : null; };
+          const Top = ({ title, onBack, onTitleLongPress }) => {
+            const { C, s } = useT();
+            return (
+              <View style={s.top}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+                  {onBack ? (
+                    <Pressable onPress={onBack} hitSlop={12} style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: C.field, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.line }}>
+                      <Text style={{ color: C.ink, fontSize: 24, lineHeight: 28, marginLeft: -2 }}>‹</Text>
+                    </Pressable>
+                  ) : null}
+                  <Pressable onLongPress={onTitleLongPress}>
+                    <Text style={s.topT}>{title}</Text>
+                  </Pressable>
+                </View>
+              </View>
+            );
+          };
+          const Select = ({ value, placeholder, options, onPick }) => {
+            const { C, s } = useT(); const [open, setOpen] = useState(false);
+            return (
+              <View style={{ gap: 6 }}>
+                <Pressable onPress={() => setOpen(!open)} style={[s.in, s.sel]}>
+                  <Text style={{ color: value ? C.ink : C.mute, fontSize: 16, flex: 1 }}>{value || placeholder}</Text>
+                  <Text style={{ color: C.mute }}>{open ? '▲' : '▼'}</Text>
+                </Pressable>
+                {open ? (<View style={s.selList}>{options.map((o, i) => (
+                  <Pressable key={o} onPress={() => { onPick(o); setOpen(false); }} style={[s.selItem, i === options.length - 1 && { borderBottomWidth: 0 }, o === value && { backgroundColor: C.primarySoft }]}>
+                    <Text style={{ color: C.ink, fontSize: 16 }}>{o}</Text>
+                  </Pressable>))}</View>) : null}
+              </View>
+            );
+          };
+          const DateField = ({ value, onPick, min }) => {
+            const { C, s } = useT();
+            const open = () => DateTimePickerAndroid.open({
+              value: parseYMD(value), mode: 'date', minimumDate: min ? parseYMD(min) : undefined,
+              onChange: (e, d) => { if (e?.type === 'set' && d) onPick(toYMD(d)); },
+            });
+            return (<Pressable onPress={open} style={[s.in, s.sel]}><Text style={{ color: C.ink, fontSize: 16, flex: 1 }}>{toDMY(value)}</Text><Text style={{ fontSize: 16 }}>📅</Text></Pressable>);
+          };
+          
+          function Register({ onDone, initialName = '', initialNo = '' }) {
+            const { C, s } = useT();
+            const [name, setName] = useState(initialName); const [no, setNo] = useState(initialNo);
+            const [busy, setBusy] = useState(false); const [err, setErr] = useState(''); const [dev, setDev] = useState(String(deviceId())); const [adv, setAdv] = useState(false);
+            
+            const formatName = (text) => text.replace(/\s+/g, ' ').trim();
+            
+            const cont = async () => {
+              if (!no.trim()) return setErr('Sila masukkan nombor staff');
+              await saveDeviceId(dev); 
+              const formattedName = formatName(name);
+              const sess = { staff_no: no.trim(), staff_id: '', name: formattedName }; 
+              await saveSession(sess); 
+              onDone(sess);
+            };
+            const submit = async () => {
+              const formattedName = formatName(name);
+              if (!formattedName || !no.trim()) return setErr('Sila masukkan nama dan nombor staff');
+              setBusy(true); setErr('');
+              if (initialNo && no.trim() === initialNo) {
+                 await saveDeviceId(dev);
+                 const sess = { staff_no: no.trim(), staff_id: '', name: formattedName };
+                 await saveSession(sess);
+                 setBusy(false);
+                 return onDone(sess);
+              }
+              try {
+                await saveDeviceId(dev);
+                const r = unwrap(await call(EP.register, { name: formattedName, staff_no: no.trim(), imei: deviceId() }));
+                const sess = { staff_no: no.trim(), staff_id: r?.staff_id ?? r?.id ?? '', name: formatName(r?.name ?? formattedName) };
+                await saveSession(sess); 
+                onDone(sess);
+              } catch (e) { 
+                 setErr(e.message); 
+              } finally { 
+                 setBusy(false); 
+              }
+            };
+            return (
+              <ScrollView contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
+                <View style={s.regTopCentered}>
+                  <Pressable onLongPress={() => setAdv(!adv)} delayLongPress={1500} style={{ alignItems: 'center' }}>
+                    <Image source={require('./assets/icon.png')} style={{ width: 90, height: 90, marginBottom: 12 }} resizeMode="contain" />
+                    <Text style={s.logo}>iHR</Text>
+                    <Text style={s.sub}>Lembaga Perindustrian Kayu Malaysia</Text>
+                  </Pressable>
+                </View>
+                <View style={{ padding: 16, gap: 14 }}>
+                  <Card title="Daftar Pengguna Baru" icon="👤" tint={C.navy}>
+                    <Text style={s.lbl}>Nama penuh</Text>
+                    <TextInput style={s.in} value={name} onChangeText={setName} placeholder="Seperti dalam kad pengenalan" placeholderTextColor={C.mute} />
+                    <Text style={s.lbl}>Nombor staff</Text>
+                    <TextInput style={s.in} value={no} onChangeText={setNo} autoCapitalize="characters" placeholder="Contoh: 01234" placeholderTextColor={C.mute} />
+                    <Err msg={err} />
+                    <Btn label={initialNo ? "Log Masuk" : "Daftar"} onPress={submit} busy={busy} />
+                  </Card>
+                  {adv ? (<Card title="Tetapan lanjutan" icon="⚙️" tint={C.navy}>
+                    <Text style={s.lbl}>ID peranti. Tukar hanya jika perlu guna ID yang sudah didaftarkan untuk telefon ini.</Text>
+                    <TextInput style={s.in} value={dev} onChangeText={setDev} autoCapitalize="none" autoCorrect={false} />
+                    <Btn kind="ghost" label="Sudah berdaftar - teruskan" onPress={cont} />
+                  </Card>) : null}
+                  <Text style={s.hint}>Peranti ini akan didaftarkan bersama nombor staff anda.</Text>
+                </View>
+              </ScrollView>
+            );
+          }
+          
+          function Dashboard({ sess, go, onSess, onLogout }) {
+            const { C, s, themeMode, changeTheme } = useT();
+            const [data, setData] = useState(null); const [err, setErr] = useState(''); const [busy, setBusy] = useState(false);
+            const [online, setOnline] = useState(null); const [at, setAt] = useState(''); const [tags, setTags] = useState([]);
+            const [photo, setPhoto] = useState(null); const [badPhoto, setBadPhoto] = useState(false);
+            const [tagDetails, setTagDetails] = useState([]);
+            
+            const [now, setNow] = useState(new Date());
+            useEffect(() => {
+              const timer = setInterval(() => setNow(new Date()), 1000);
+              return () => clearInterval(timer);
+            }, []);
+            const h = now.getHours();
+            const greeting = h < 12 ? 'Selamat Pagi' : h < 15 ? 'Selamat Tengah Hari' : h < 19 ? 'Selamat Petang' : 'Selamat Malam';
+            
+            const load = useCallback(async () => {
+              setBusy(true); setErr('');
+              try {
+                const r = await call(EP.dashboard, { staff_no: sess.staff_no, staff_id: sess.staff_id });
+                setData(r); setOnline(true); setAt(new Date().toLocaleTimeString('ms-MY', { hour: '2-digit', minute: '2-digit' }));
+                
+                setTags(await getLocalTags());
+                const d = new Date();
+                const detailKey = `TAG_DETAILS_${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+                const detailsStr = await SecureStore.getItemAsync(detailKey);
+                if (detailsStr) setTagDetails(JSON.parse(detailsStr));
+                
+                { const p = findPhoto(r); if (p) { setPhoto(p); setBadPhoto(false); } }
+                const sd = r?.staff_data;
+                if (sd?.staff_id && String(sd.staff_id) !== String(sess.staff_id)) { const ns = { staff_no: String(sd.staff_no ?? sess.staff_no), staff_id: String(sd.staff_id), name: sd.name || sess.name }; saveSession(ns); onSess && onSess(ns); }
+              } catch (e) {
+                setOnline(false);
+                setErr(e.message.includes('HTTP 500') ? e.message + '\n\nPeranti ini belum dikaitkan dengan akaun di pelayan. ID peranti: ' + deviceId() : e.message);
+              } finally { setBusy(false); }
+            }, [sess]);
+            
+            useEffect(() => { load(); }, [load]);
+            
+            const handleLogout = () => {
+              Alert.alert('Daftar Keluar', 'Adakah anda pasti mahu kembali ke paparan pendaftaran?', [
+                { text: 'Batal', style: 'cancel' },
+                { text: 'Ya', onPress: async () => { await clearSession(); onLogout(sess); } }
+              ]);
+            };
+            
+            const getMethodIcon = (m) => {
+              if (m === 'qr') return (
+                <>
+                  <MaterialIcons name="qr-code-2" size={18} color={C.ink} style={{ opacity: 0.7 }} />
+                  <Text style={{ color: C.mute, fontSize: 12, marginLeft: 6, fontWeight: '600' }}>Imbas QR</Text>
+                </>
+              );
+              if (m === 'geo') return (
+                <>
+                  <MaterialIcons name="map" size={18} color={C.ink} style={{ opacity: 0.7 }} />
+                  <Text style={{ color: C.mute, fontSize: 12, marginLeft: 6, fontWeight: '600' }}>Geo Tagging</Text>
+                </>
+              );
+              return null;
+            };
+            
+            const sd = data?.staff_data || {};
+            const name = sd.name || sess.name || 'Pengguna';
+            const hasSrv = !!data && ('first_tagging' in data || 'last_tagging' in data);
+            
+            const msSrv = (v) => { const m = /(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})/.exec(String(v || '')); return m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]).getTime() : null; };
+            const ms12 = (v) => { const m = /(\d{1,2}):(\d{2})\s*(AM|PM)/i.exec(String(v || '')); if (!m) return null; const d = new Date(); d.setHours((+m[1] % 12) + (/pm/i.test(m[3]) ? 12 : 0), +m[2], 0, 0); return d.getTime(); };
+            const tg = [...tags].sort((x, y) => x.t - y.t);
+            
+            let firstMs = (hasSrv ? msSrv(data.first_tagging) : null) ?? ms12(data?.msg?.clock_in);
+            if (firstMs == null && tg.length) firstMs = tg[0].t;
+            const first = firstMs != null ? fromMs(firstMs) : null;
+            const firstM = tg.length ? (tg.find((x) => firstMs == null || Math.abs(x.t - firstMs) <= 300000) || tg[0]).m : '';
+            
+            let lastMs = firstMs;
+            const cands = [hasSrv ? msSrv(data.last_tagging) : null, ms12(data?.msg?.clock_out), ...tg.map((x) => x.t)]
+              .filter((v) => v != null && firstMs != null && v > firstMs);
+            if (cands.length) lastMs = Math.max(...cands);
+            const last = lastMs != null ? fromMs(lastMs) : null;
+            const lastM = lastMs === firstMs ? firstM : ((tg.find((x) => x.t === lastMs) || {}).m || '');
+            
+            const showTagInfo = (title, isFirst) => {
+              const timeVal = isFirst ? first : last;
+              const legacyMethod = isFirst ? firstM : lastM;
+              const detail = (isFirst || lastMs === firstMs) ? tagDetails[0] : tagDetails[tagDetails.length - 1];
+              if (!timeVal || timeVal === '—') {
+                Alert.alert(title, "Belum ada rekod kehadiran.");
+                return;
+              }
+              
+              if (detail) {
+                 const methodName = detail.m === 'qr' ? 'Imbas QR' : 'Geo Tagging';
+                 Alert.alert(
+                   `Maklumat ${title}`, 
+                   `Kaedah: ${methodName}\nMasa: ${timeVal}\nLokasi: ${detail.address || 'Lokasi tidak dikesan'}`
+                 );
+              } else if (legacyMethod) {
+                 const methodName = legacyMethod === 'qr' ? 'Imbas QR' : 'Geo Tagging';
+                 Alert.alert(
+                   `Maklumat ${title}`, 
+                   `Kaedah: ${methodName}\nMasa: ${timeVal}\n\n*Lokasi terperinci tidak ditemui untuk sesi ini.*`
+                 );
+              } else {
+                 Alert.alert(
+                   `Maklumat ${title}`, 
+                   `Masa: ${timeVal}\n\nRekod ini disegerakkan daripada pelayan web. Maklumat lokasi peranti tidak tersedia.`
+                 );
+              }
+            };
+            
+            const ring = data ? colorOf(data.att_color, C.accent) : C.accent;
+            
+            return (
+              <ScrollView contentContainerStyle={{ paddingBottom: 28 }}>
+                <View style={s.dashTop}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <View style={{ backgroundColor: '#fff', borderRadius: 8, padding: 2 }}>
+                       <Image source={require('./assets/icon.png')} style={{ width: 36, height: 36 }} resizeMode="contain" />
+                    </View>
+                    <Text style={{ color: C.ink, fontSize: 32, fontWeight: '800', letterSpacing: 0.5 }}>iHR</Text>
+                  </View>
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Pressable onPress={handleLogout} style={s.status}>
+                      <View style={[s.dot, { backgroundColor: online == null ? C.mute : online ? C.ok : C.bad }]} />
+                      <Text style={s.statusT}>{online == null ? 'Menyemak…' : online ? `Dalam talian ${at}` : 'Luar talian'}</Text>
+                    </Pressable>
+                    <View style={{ flexDirection: 'row', gap: 6, marginTop: 8 }}>
+                      <Pressable onPress={() => changeTheme(themeMode === 'dark' ? 'light' : 'dark')} hitSlop={10} style={{ paddingHorizontal: 8, paddingVertical: 6, flexDirection: 'row', alignItems: 'center', backgroundColor: C.field, borderRadius: 14, borderWidth: 1, borderColor: C.line }}>
+                        <MaterialIcons name={themeMode === 'dark' ? 'light-mode' : 'dark-mode'} size={15} color={C.primaryText} />
+                      </Pressable>
+                      <Pressable onPress={load} disabled={busy} hitSlop={10} style={{ paddingHorizontal: 10, paddingVertical: 6, flexDirection: 'row', alignItems: 'center', backgroundColor: C.field, borderRadius: 14, borderWidth: 1, borderColor: C.line }}>
+                        {busy ? <ActivityIndicator size="small" color={C.primaryText} /> : (
+                          <>
+                            <MaterialIcons name="sync" size={16} color={C.primaryText} />
+                            <Text style={{ fontSize: 12, color: C.primaryText, fontWeight: '700', marginLeft: 4 }}>Muat Semula</Text>
+                          </>
+                        )}
+                      </Pressable>
+                    </View>
+                  </View>
+                </View>
+                <View style={s.profile}>
+                  <Pressable onLongPress={() => Alert.alert('Medan data pelayan', data ? `${Object.keys(data).join(', ')}\n\nstaff_data: ${Object.keys(sd).join(', ') || '-'}\n\nGambar: ${photo ? 'dijumpai' : 'tiada'}` : 'Tiada data')}>
+                    <View style={[s.ring, { borderColor: ring }]}><View style={s.ringIn}>
+                      {photo && !badPhoto ? <Image source={photo.startsWith('data:') ? { uri: photo } : { uri: photo, headers: { imei: String(deviceId()) } }} style={s.ringImg} resizeMode="cover" onError={() => setBadPhoto(true)} /> : <Text style={s.ringT}>{name.trim()[0]?.toUpperCase() || 'I'}</Text>}
+                    </View></View>
+                  </Pressable>
+                  <View style={s.pNameBox}>
+                    <Text style={{ color: C.mute, fontSize: 16, fontWeight: '700', marginBottom: 4 }}>{greeting},</Text>
+                    {wrapName(name).map((l, i) => <Text key={i} style={s.pName} numberOfLines={1}>{l}</Text>)}
+                  </View>
+                  <View style={s.chips}>
+                    <View style={s.chip}><Text style={s.chipT}>No. staff {sd.staff_no ?? sess.staff_no}</Text></View>
+                  </View>
+                  {data ? <View style={s.pill}><Text style={s.pillT}>{data.msg?.clock_in || 'Belum ada rekod waktu masuk hari ini.'}</Text></View> : null}
+                </View>
+                
+                <View style={{ paddingHorizontal: 16, gap: 14 }}>
+                  <View style={{ alignItems: 'center', backgroundColor: C.card, paddingVertical: 18, borderRadius: 20, borderWidth: 1, borderColor: C.line, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 }}>
+                    <Text style={{ fontSize: 38, fontWeight: '800', color: C.ink, letterSpacing: 1, fontVariant: ['tabular-nums'] }}>
+                      {now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                    </Text>
+                    <Text style={{ fontSize: 14, color: C.primary, fontWeight: '700', marginTop: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                      {now.toLocaleDateString('ms-MY', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                    </Text>
+                  </View>
+                  <View style={s.statRow}>
+                    <Stat icon="📍" label="First Tagging" value={first || '—'} tint={C.primary} methodIcon={firstM ? getMethodIcon(firstM) : null} onPress={() => showTagInfo('First Tagging', true)} />
+                    <Stat icon="📌" label="Last Tagging" value={last || '—'} tint={C.navy} methodIcon={lastM ? getMethodIcon(lastM) : null} onPress={() => showTagInfo('Last Tagging', false)} />
+                  </View>
+                  <QuickActionBar go={go} />
+                  <WeeklySummaryCard tags={tags} todayFirst={first} todayLast={last} />
+                  
+                  <Err msg={err} />
+                  {busy && !data ? <ActivityIndicator color={C.primaryText} /> : null}
+                </View>
+                
+                <View style={{ marginTop: 32, marginBottom: 10, alignItems: 'center' }}>
+                  <Text style={{ color: C.mute, fontSize: 12, fontWeight: '600' }}>Copyright © 2026 MTIB</Text>
+                </View>
+              </ScrollView>
+            );
+          }
+          
+          function useFix() {
+            const [fix, setFix] = useState(null); const [err, setErr] = useState('');
+            const get = useCallback(async () => {
+              setErr('');
+              const p = await Location.requestForegroundPermissionsAsync();
+              if (p.status !== 'granted') return setErr('Tiada akses lokasi');
+              try { const l = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }); setFix(l.coords); }
+              catch { setErr('Peranti tidak dapat mengesan lokasi anda'); }
+            }, []);
+            useEffect(() => { get(); }, [get]);
+            return { fix, err, get, setFix };
+          }
+          
+          const Loc = ({ fix, err, get }) => {
+            const { C } = useT(); const [open, setOpen] = useState(false);
+            const summary = fix ? `${fix.latitude.toFixed(5)}, ${fix.longitude.toFixed(5)} · ± ${Math.round(fix.accuracy || 0)} m` : (err || 'Mengesan lokasi…');
+            return (
+              <Collapse title="Lokasi semasa" icon="🛰" tint={C.navy} summary={summary} warn={!fix && !!err} open={open} onToggle={() => setOpen(!open)}>
+                {fix ? <>
+                  <Row icon="🧭" k="Latitud" v={fix.latitude.toFixed(6)} tint={C.navy} />
+                  <Row icon="🧭" k="Longitud" v={fix.longitude.toFixed(6)} tint={C.navy} />
+                  <Row icon="🎯" k="Ketepatan" v={`± ${Math.round(fix.accuracy || 0)} m`} tint={C.primary} last /></>
+                  : <Text style={{ color: C.mute }}>{err || 'Mengesan lokasi…'}</Text>}
+                <Err msg={fix ? '' : err} />
+                <Btn kind="ghost" icon="🔄" label="Kesan semula" onPress={get} />
+              </Collapse>
+            );
+          };
+          const QuickActionBar = ({ go }) => {
+            const { C } = useT();
+            const items = [
+              { id: 'qr', label: 'Imbas QR', icon: 'qr-code-2' },
+              { id: 'geo', label: 'Geo Tagging', icon: 'location-on' },
+              { id: 'history', label: 'Sejarah', icon: 'access-time' },
+              { id: 'profile', label: 'Profil', icon: 'person-outline' },
+            ];
+            return (
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 4, marginVertical: 6 }}>
+                {items.map((item) => (
+                  <Pressable
+                    key={item.id}
+                    onPress={() => go(item.id)}
+                    style={({ pressed }) => [{ alignItems: 'center', flex: 1 }, pressed && { opacity: 0.7 }]}
+                  >
+                    <View style={{
+                      width: 62,
+                      height: 62,
+                      borderRadius: 20,
+                      backgroundColor: C.primarySoft || '#F8E5E1',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderWidth: 1,
+                      borderColor: (C.line || '#E0D0CC') + '80',
+                      marginBottom: 8,
+                      shadowColor: '#000',
+                      shadowOpacity: 0.04,
+                      shadowRadius: 4,
+                      elevation: 1,
+                    }}>
+                      <MaterialIcons name={item.icon} size={28} color={C.primary} />
+                    </View>
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: C.ink, textAlign: 'center' }}>
+                      {item.label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            );
+          };
+          const attKey = (s) => {
+            const p = String(s || '').split(/[-/.]/);
+            if (p.length !== 3) return null;
+            const d = +p[0], m = +p[1], y = +p[2];
+            if (!d || !m || y < 1000) return null;
+            return y * 10000 + m * 100 + d;
+          };
+          const mergeAttendance = (oldRows, newRows, keepDays = 400) => {
+            const map = new Map();
+            [...oldRows, ...newRows].forEach((r) => { const k = attKey(r && r.date); if (k) map.set(k, r); });
+            const c = new Date(); c.setDate(c.getDate() - keepDays);
+            const cutKey = c.getFullYear() * 10000 + (c.getMonth() + 1) * 100 + c.getDate();
+            return [...map.entries()].filter(([k]) => k >= cutKey).sort((a, b) => b[0] - a[0]).map(([, r]) => r);
+          };
+          const WeeklySummaryCard = ({ tags = [], todayFirst = null, todayLast = null }) => {
+            const { C, s } = useT();
+            const [selectedDay, setSelectedDay] = useState(null);
+            const [showAllModal, setShowAllModal] = useState(false);
+            const [serverRows, setServerRows] = useState([]);
+            const [dropdownOpen, setDropdownOpen] = useState(false);
+            
+            const today = new Date();
+            const currentYear = today.getFullYear();
+            const currentMonth = today.getMonth();
+            const [monthSel, setMonthSel] = useState(`${currentYear}-${currentMonth}`);
+            
+            useEffect(() => {
+              const fetchServerData = async () => {
+                try {
+                  const stored = await SecureStore.getItemAsync('SYNCED_SERVER_ATTENDANCE');
+                  if (stored) {
+                    const parsed = JSON.parse(stored);
+                    if (Array.isArray(parsed) && parsed.length > 0) {
+                      setServerRows(parsed);
+                    }
+                  }
+                } catch (_) {}
+              };
+              fetchServerData();
+              const timer = setInterval(fetchServerData, 30000);
+              return () => clearInterval(timer);
+            }, []);
+
+            const dayNames = ['Ahd', 'Isn', 'Sel', 'Rab', 'Kha', 'Jum', 'Sab'];
+            const fullDayNames = ['Ahad', 'Isnin', 'Selasa', 'Rabu', 'Khamis', 'Jumaat', 'Sabtu'];
+            const currentDayOfWeek = today.getDay();
+            const sunday = new Date(today);
+            sunday.setDate(today.getDate() - currentDayOfWeek);
+            
+            const weekDays = [];
+            let tepatCount = 0;
+            let lewatCount = 0;
+            let tiadaCount = 0;
+
+            const buildDay = (d) => {
+              const i = d.getDay();
+              const isToday = d.toDateString() === today.toDateString();
+              const isPast = d <= today;
+              const isWeekend = (i === 0 || i === 6);
+              const dateFormatted = `${d.getDate()}/${d.getMonth() + 1}/${d.getFullYear()}`;
+              
+              let hours = 0;
+              let status = 'tiada';
+              let inTime = '—';
+              let outTime = '—';
+              let notes = '';
+              let hasServerMatch = false;
+
+              if (serverRows.length > 0) {
+                const matched = serverRows.find(r => {
+                  const parts = String(r.date || '').split(/[-/]/);
+                  if (parts.length === 3) {
+                    return +parts[0] === d.getDate() && +parts[1] === (d.getMonth() + 1) && +parts[2] === d.getFullYear();
+                  }
+                  return false;
+                });
+                if (matched) {
+                  hasServerMatch = true;
+                  inTime = matched.clockIn ? matched.clockIn : (isToday && todayFirst ? todayFirst : '—');
+                  outTime = matched.clockOut ? matched.clockOut : (isToday && todayLast ? todayLast : '—');
+                  notes = matched.notes || '';
+                  if (inTime !== '—') {
+                    const mIn = /(\d{1,2}):(\d{2})\s*(AM|PM)?/i.exec(inTime);
+                    let hrIn = 0, mnIn = 0;
+                    if (mIn) {
+                      hrIn = (+mIn[1] % 12) + (/pm/i.test(mIn[3] || '') ? 12 : 0);
+                      mnIn = +mIn[2];
+                    }
+                    const isLate = hrIn > 9 || (hrIn === 9 && mnIn > 0);
+                    status = isLate ? 'lewat' : 'tepat';
+                    if (outTime !== '—') {
+                      const mOut = /(\d{1,2}):(\d{2})\s*(AM|PM)?/i.exec(outTime);
+                      if (mIn && mOut) {
+                        const hrOut = (+mOut[1] % 12) + (/pm/i.test(mOut[3] || '') ? 12 : 0);
+                        const mnOut = +mOut[2];
+                        const diffMins = (hrOut * 60 + mnOut) - (hrIn * 60 + mnIn);
+                        hours = diffMins > 0 ? parseFloat((diffMins / 60).toFixed(1)) : 8.0;
+                      } else {
+                        hours = 8.5;
+                      }
+                    } else {
+                      hours = isToday ? 8.0 : 8.0;
+                    }
+                  } else if (notes && /outdoor|kerja luar|cuti|mesyuarat/i.test(notes)) {
+                    inTime = 'Tugasan';
+                    outTime = notes;
+                    hours = 8.0;
+                    status = 'tepat';
+                  } else {
+                    status = 'tiada';
+                    hours = 0;
+                  }
+                }
+              }
+
+              if (!hasServerMatch) {
+                if (isToday) {
+                  if (todayFirst) {
+                    inTime = todayFirst;
+                    outTime = todayLast || todayFirst;
+                    status = 'tepat';
+                    hours = 8.0;
+                    
+                    const m = /(\d{1,2}):(\d{2})\s*(AM|PM)/i.exec(String(todayFirst));
+                    if (m) {
+                      const hr = (+m[1] % 12) + (/pm/i.test(m[3]) ? 12 : 0);
+                      const mn = +m[2];
+                      if (hr > 9 || (hr === 9 && mn > 0)) {
+                        status = 'lewat';
+                      }
+                    }
+                    if (todayLast && todayLast !== todayFirst) {
+                      const mOut = /(\d{1,2}):(\d{2})\s*(AM|PM)/i.exec(String(todayLast));
+                      if (m && mOut) {
+                        const hIn = (+m[1] % 12) + (/pm/i.test(m[3]) ? 12 : 0) + (+m[2] / 60);
+                        const hOut = (+mOut[1] % 12) + (/pm/i.test(mOut[3]) ? 12 : 0) + (+mOut[2] / 60);
+                        if (hOut > hIn) {
+                          hours = parseFloat((hOut - hIn).toFixed(1));
+                        } else {
+                          hours = 8.5;
+                        }
+                      } else {
+                        hours = 8.5;
+                      }
+                    }
+                  } else {
+                    status = 'tiada';
+                  }
+                } else if (isPast && !isWeekend) {
+                  status = 'tiada';
+                  hours = 0;
+                } else if (isWeekend) {
+                  status = 'tiada';
+                  hours = 0;
+                }
+              }
+
+              return {
+                dayLabel: dayNames[i],
+                fullDay: fullDayNames[i],
+                dateStr: dateFormatted,
+                hours: hours,
+                status: status,
+                inTime: inTime,
+                outTime: outTime,
+                notes: notes,
+                isToday: isToday,
+                synced: hasServerMatch,
+              };
+            };
+
+            for (let i = 0; i < 7; i++) {
+              const d = new Date(sunday);
+              d.setDate(sunday.getDate() + i);
+              const item = buildDay(d);
+              if (item.status === 'tepat') tepatCount++;
+              else if (item.status === 'lewat') lewatCount++;
+              else tiadaCount++;
+              weekDays.push(item);
+            }
+
+            const monthNames = ['Januari', 'Februari', 'Mac', 'April', 'Mei', 'Jun', 'Julai', 'Ogos', 'September', 'Oktober', 'November', 'Disember'];
+            
+            // Bina senarai bulan: sekurang-kurangnya 12 bulan ke belakang dari hari ini + sebarang rekod server
+            const monthSet = new Set();
+            for (let b = 0; b < 12; b++) {
+              const pastD = new Date(currentYear, currentMonth - b, 1);
+              monthSet.add(`${pastD.getFullYear()}-${pastD.getMonth()}`);
+            }
+            serverRows.forEach((r) => {
+              const pp = String(r.date || '').split(/[-/.]/);
+              if (pp.length === 3 && +pp[1] >= 1 && +pp[1] <= 12 && +pp[2] > 1000) {
+                monthSet.add(`${+pp[2]}-${+pp[1] - 1}`);
+              }
+            });
+
+            const monthList = [...monthSet].map((k) => {
+              const [yy, mm] = k.split('-').map(Number);
+              return { k, y: yy, m: mm, label: `Bulan ${mm + 1} (${monthNames[mm]} ${yy})` };
+            }).sort((a, b) => (b.y - a.y) || (b.m - a.m));
+
+            // Jana hari mengikut bulan kalendar yang dipilih (contoh: Bulan 11 mempunyai 30 hari penuh)
+            const [sy, sm] = (monthSel || `${currentYear}-${currentMonth}`).split('-').map(Number);
+            const totalDaysInMonth = new Date(sy, sm + 1, 0).getDate();
+            const modalDays = [];
+            for (let dd = totalDaysInMonth; dd >= 1; dd--) {
+              modalDays.push(buildDay(new Date(sy, sm, dd, 12, 0, 0)));
+            }
+
+            const selectedMonthObj = monthList.find(item => item.k === monthSel) || monthList[0];
+            const modalTitle = `Jadual Bulan ${sm + 1} (${monthNames[sm]} ${sy})`;
+
+            let mdTepat = 0, mdLewat = 0, mdTiada = 0;
+            modalDays.forEach((x) => {
+              if (x.status === 'tepat') mdTepat++;
+              else if (x.status === 'lewat') mdLewat++;
+              else mdTiada++;
+            });
+
+            const maxH = Math.max(...weekDays.map(w => w.hours), 9.0);
+
+            return (
+              <View style={{
+                backgroundColor: C.card,
+                borderRadius: 22,
+                padding: 18,
+                borderWidth: 1,
+                borderColor: C.line,
+                elevation: 2,
+                shadowColor: '#000',
+                shadowOpacity: 0.05,
+                shadowRadius: 8,
+              }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                  <Pressable onPress={() => setShowAllModal(true)} hitSlop={8} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={{ fontSize: 18, fontWeight: '800', color: C.ink }}>Ringkasan 7 hari</Text>
+                    <MaterialIcons name="grid-view" size={17} color={C.primary} />
+                  </Pressable>
+                  <Pressable onPress={() => setShowAllModal(true)} style={{ backgroundColor: '#E8F5E9', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 }}>
+                    <Text style={{ color: '#2E7D4F', fontWeight: '800', fontSize: 12 }}>
+                      {`${tepatCount} TEPAT`}
+                    </Text>
+                  </Pressable>
+                </View>
+                {/* Carta Bar Mingguan */}
+                <View style={{ flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', height: 130, paddingTop: 16 }}>
+                  {weekDays.map((item, idx) => {
+                    const barHeight = item.hours > 0 ? Math.max((item.hours / maxH) * 85, 20) : 8;
+                    const barColor = item.status === 'tepat' ? C.primary : item.status === 'lewat' ? '#D97706' : (C.line || '#E0E0E0');
+                    return (
+                      <Pressable 
+                        key={idx} 
+                        onPress={() => setSelectedDay(item)}
+                        style={({ pressed }) => [{ alignItems: 'center', flex: 1 }, pressed && { opacity: 0.6 }]}
+                      >
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: item.hours > 0 ? C.ink : 'transparent', marginBottom: 6 }}>
+                          {item.hours > 0 ? item.hours.toFixed(1) : '-'}
+                        </Text>
+                        <View style={{
+                          width: 32,
+                          height: barHeight,
+                          backgroundColor: barColor,
+                          borderRadius: 8,
+                        }} />
+                        <Text style={{ fontSize: 12, fontWeight: item.isToday ? '800' : '600', color: item.isToday ? C.primary : C.mute, marginTop: 8 }}>
+                          {item.dayLabel}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+                <View style={{ height: 1, backgroundColor: C.line, marginVertical: 14, opacity: 0.7 }} />
+                {/* 3 Statistik di bawah */}
+                <Pressable onPress={() => setShowAllModal(true)} style={{ flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center' }}>
+                  <View style={{ alignItems: 'center' }}>
+                    <Text style={{ fontSize: 22, fontWeight: '800', color: '#2E7D4F' }}>{tepatCount}</Text>
+                    <Text style={{ fontSize: 12, color: C.mute, marginTop: 3, fontWeight: '600' }}>Tepat masa</Text>
+                  </View>
+                  <View style={{ alignItems: 'center' }}>
+                    <Text style={{ fontSize: 22, fontWeight: '800', color: '#D97706' }}>{lewatCount}</Text>
+                    <Text style={{ fontSize: 12, color: C.mute, marginTop: 3, fontWeight: '600' }}>Lewat</Text>
+                  </View>
+                  <View style={{ alignItems: 'center' }}>
+                    <Text style={{ fontSize: 22, fontWeight: '800', color: C.mute }}>{tiadaCount}</Text>
+                    <Text style={{ fontSize: 12, color: C.mute, marginTop: 3, fontWeight: '600' }}>Tiada rekod</Text>
+                  </View>
+                </Pressable>
+                <View style={{ alignItems: 'center', marginTop: 10 }}>
+                  <Text style={{ fontSize: 10, color: C.mute, fontStyle: 'italic' }}>
+                    {serverRows.length > 0 ? '✓ Diselaraskan dengan Portal Pelayan MTIB' : '* Buka tab Sejarah untuk selaraskan rekod rasmi portal'}
+                  </Text>
+                </View>
+
+                {/* MODAL 1: Butiran Satu Hari */}
+                <Modal visible={!!selectedDay} transparent animationType="fade" onRequestClose={() => setSelectedDay(null)}>
+                  <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+                    <View style={{
+                      backgroundColor: C.card,
+                      borderRadius: 24,
+                      width: '100%',
+                      maxWidth: 360,
+                      padding: 20,
+                      borderWidth: 1.5,
+                      borderColor: C.line,
+                      shadowColor: '#000',
+                      shadowOpacity: 0.2,
+                      shadowRadius: 16,
+                      elevation: 8,
+                    }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: C.line, paddingBottom: 14 }}>
+                        <View>
+                          <Text style={{ fontSize: 20, fontWeight: '800', color: C.ink }}>{selectedDay?.fullDay}</Text>
+                          <Text style={{ fontSize: 13, color: C.mute, marginTop: 2 }}>{selectedDay?.dateStr}</Text>
+                        </View>
+                        <View style={{
+                          paddingHorizontal: 12,
+                          paddingVertical: 6,
+                          borderRadius: 14,
+                          backgroundColor: selectedDay?.status === 'tepat' ? '#E8F5E9' : selectedDay?.status === 'lewat' ? '#FEF3C7' : C.field,
+                          borderWidth: 1,
+                          borderColor: selectedDay?.status === 'tepat' ? '#A7F3D0' : selectedDay?.status === 'lewat' ? '#FDE68A' : C.line
+                        }}>
+                          <Text style={{
+                            fontSize: 12,
+                            fontWeight: '800',
+                            color: selectedDay?.status === 'tepat' ? '#2E7D4F' : selectedDay?.status === 'lewat' ? '#D97706' : C.mute
+                          }}>
+                            {selectedDay?.status === 'tepat' ? 'Tepat Masa' : selectedDay?.status === 'lewat' ? 'Lewat' : 'Tiada Rekod'}
+                          </Text>
+                        </View>
+                      </View>
+                      <View style={{ flexDirection: 'row', gap: 12, marginVertical: 18 }}>
+                        <View style={{
+                          flex: 1,
+                          backgroundColor: C.field,
+                          borderRadius: 16,
+                          padding: 14,
+                          borderWidth: 1,
+                          borderColor: C.line,
+                          alignItems: 'center'
+                        }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                            <MaterialIcons name="login" size={16} color="#2E7D4F" />
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: C.mute, textTransform: 'uppercase' }}>Masuk</Text>
+                          </View>
+                          <Text style={{ fontSize: 17, fontWeight: '800', color: C.ink }}>{selectedDay?.inTime}</Text>
+                        </View>
+                        <View style={{
+                          flex: 1,
+                          backgroundColor: C.field,
+                          borderRadius: 16,
+                          padding: 14,
+                          borderWidth: 1,
+                          borderColor: C.line,
+                          alignItems: 'center'
+                        }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                            <MaterialIcons name="logout" size={16} color="#C4513A" />
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: C.mute, textTransform: 'uppercase' }}>Keluar</Text>
+                          </View>
+                          <Text style={{ fontSize: 17, fontWeight: '800', color: C.ink }}>{selectedDay?.outTime}</Text>
+                        </View>
+                      </View>
+                      <View style={{
+                        backgroundColor: C.primarySoft || '#F8E5E1',
+                        borderRadius: 16,
+                        padding: 12,
+                        flexDirection: 'row',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        marginBottom: 18,
+                        borderWidth: 1,
+                        borderColor: (C.line || '#E0D0CC') + '80'
+                      }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <MaterialIcons name="schedule" size={20} color={C.primary} />
+                          <Text style={{ fontSize: 13, fontWeight: '700', color: C.ink }}>
+                            {selectedDay?.notes ? selectedDay.notes : 'Jumlah Jam Bekerja'}
+                          </Text>
+                        </View>
+                        <Text style={{ fontSize: 15, fontWeight: '800', color: C.primary }}>
+                          {selectedDay?.hours > 0 ? `${selectedDay.hours} Jam` : '—'}
+                        </Text>
+                      </View>
+                      <Btn label="Tutup" onPress={() => setSelectedDay(null)} />
+                    </View>
+                  </View>
+                </Modal>
+
+                {/* MODAL 2: Jadual Mengikut Bulan Pilihan */}
+                <Modal visible={showAllModal} transparent animationType="slide" onRequestClose={() => { setShowAllModal(false); setDropdownOpen(false); }}>
+                  <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'flex-end' }}>
+                    <View style={{
+                      backgroundColor: C.card,
+                      borderTopLeftRadius: 28,
+                      borderTopRightRadius: 28,
+                      padding: 20,
+                      maxHeight: '88%',
+                      borderWidth: 1,
+                      borderColor: C.line,
+                      shadowColor: '#000',
+                      shadowOpacity: 0.25,
+                      shadowRadius: 16,
+                      elevation: 10,
+                    }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontSize: 19, fontWeight: '800', color: C.ink }}>{modalTitle}</Text>
+                          <Text style={{ fontSize: 12, color: C.mute, marginTop: 2 }}>{`${totalDaysInMonth} hari · ${mdTepat} tepat · ${mdLewat} lewat · ${mdTiada} tiada rekod`}</Text>
+                        </View>
+                        <Pressable onPress={() => { setShowAllModal(false); setDropdownOpen(false); }} style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: C.field, alignItems: 'center', justifyContent: 'center' }}>
+                          <Text style={{ fontSize: 16, color: C.mute, fontWeight: '800' }}>✕</Text>
+                        </Pressable>
+                      </View>
+
+                      {/* Dropdown Pemilih Bulan */}
+                      <View style={{ marginBottom: 12, zIndex: 10 }}>
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: C.mute, textTransform: 'uppercase', marginBottom: 4 }}>
+                          Pilih Bulan Rekod:
+                        </Text>
+                        <Pressable
+                          onPress={() => setDropdownOpen(!dropdownOpen)}
+                          style={{
+                            flexDirection: 'row',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            backgroundColor: C.field,
+                            borderRadius: 14,
+                            paddingHorizontal: 14,
+                            paddingVertical: 12,
+                            borderWidth: 1.5,
+                            borderColor: dropdownOpen ? C.primary : C.line
+                          }}
+                        >
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                            <MaterialIcons name="calendar-month" size={20} color={C.primary} />
+                            <Text style={{ fontSize: 14, fontWeight: '800', color: C.ink }}>
+                              {selectedMonthObj ? selectedMonthObj.label : 'Pilih Bulan'}
+                            </Text>
+                          </View>
+                          <MaterialIcons name={dropdownOpen ? "expand-less" : "expand-more"} size={22} color={C.ink} />
+                        </Pressable>
+
+                        {/* Senarai Pilihan Dropdown Terbuka */}
+                        {dropdownOpen && (
+                          <View style={{
+                            backgroundColor: C.card,
+                            borderRadius: 16,
+                            marginTop: 6,
+                            borderWidth: 1.5,
+                            borderColor: C.line,
+                            maxHeight: 180,
+                            shadowColor: '#000',
+                            shadowOpacity: 0.15,
+                            shadowRadius: 10,
+                            elevation: 8,
+                            overflow: 'hidden'
+                          }}>
+                            <ScrollView nestedScrollEnabled showsVerticalScrollIndicator={true}>
+                              {monthList.map((c, idx) => {
+                                const on = monthSel === c.k;
+                                return (
+                                  <Pressable
+                                    key={c.k}
+                                    onPress={() => {
+                                      setMonthSel(c.k);
+                                      setDropdownOpen(false);
+                                    }}
+                                    style={{
+                                      flexDirection: 'row',
+                                      alignItems: 'center',
+                                      justifyContent: 'space-between',
+                                      paddingHorizontal: 16,
+                                      paddingVertical: 12,
+                                      borderBottomWidth: idx === monthList.length - 1 ? 0 : 1,
+                                      borderBottomColor: C.line,
+                                      backgroundColor: on ? (C.primarySoft || '#F8E5E1') : 'transparent'
+                                    }}
+                                  >
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                                      <MaterialIcons
+                                        name="event"
+                                        size={18}
+                                        color={on ? C.primary : C.mute}
+                                      />
+                                      <Text style={{ fontSize: 13, fontWeight: on ? '800' : '600', color: on ? C.primary : C.ink }}>
+                                        {c.label}
+                                      </Text>
+                                    </View>
+                                    {on && <MaterialIcons name="check" size={18} color={C.primary} />}
+                                  </Pressable>
+                                );
+                              })}
+                            </ScrollView>
+                          </View>
+                        )}
+                      </View>
+
+                      {/* Senarai Rekod Kehadiran Harian Bulan Yang Dipilih */}
+                      <ScrollView style={{ marginVertical: 4 }} showsVerticalScrollIndicator={false}>
+                        {modalDays.map((w, idx) => {
+                          const isTepat = w.status === 'tepat';
+                          const isLewat = w.status === 'lewat';
+                          return (
+                            <View key={idx} style={{
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              backgroundColor: w.isToday ? (C.primarySoft || '#F8E5E1') : C.field,
+                              padding: 12,
+                              borderRadius: 16,
+                              marginBottom: 8,
+                              borderWidth: 1,
+                              borderColor: w.isToday ? C.primary : C.line
+                            }}>
+                              <View style={{ width: 85 }}>
+                                <Text style={{ fontSize: 14, fontWeight: '800', color: C.ink }}>{w.fullDay}</Text>
+                                <Text style={{ fontSize: 11, color: C.mute, marginTop: 1 }}>{w.dateStr}</Text>
+                              </View>
+                              <View style={{ alignItems: 'center', flex: 1, paddingHorizontal: 6 }}>
+                                <Text style={{ fontSize: 13, fontWeight: '700', color: C.ink, textAlign: 'center' }}>
+                                  {w.inTime} - {w.outTime}
+                                </Text>
+                                <Text style={{ fontSize: 10, color: C.mute, marginTop: 1, textAlign: 'center' }}>
+                                  {w.hours > 0 ? `${w.hours} jam` : (w.notes || (w.synced || w.isToday ? 'Tiada masa' : 'Belum diselaraskan'))}
+                                </Text>
+                              </View>
+                              <View style={{
+                                width: 75,
+                                paddingVertical: 4,
+                                borderRadius: 10,
+                                backgroundColor: isTepat ? '#E8F5E9' : isLewat ? '#FEF3C7' : C.card,
+                                borderWidth: 1,
+                                borderColor: isTepat ? '#A7F3D0' : isLewat ? '#FDE68A' : C.line,
+                                alignItems: 'center'
+                              }}>
+                                <Text style={{
+                                  fontSize: 10,
+                                  fontWeight: '800',
+                                  color: isTepat ? '#2E7D4F' : isLewat ? '#D97706' : C.mute
+                                }}>
+                                  {isTepat ? 'TEPAT' : isLewat ? 'LEWAT' : 'TIADA'}
+                                </Text>
+                              </View>
+                            </View>
+                          );
+                        })}
+                      </ScrollView>
+                      <View style={{ marginTop: 10 }}>
+                        <Btn label="Tutup Jadual" onPress={() => { setShowAllModal(false); setDropdownOpen(false); }} />
+                      </View>
+                    </View>
+                  </View>
+                </Modal>
+              </View>
+            );
+          };
+          const HistoryView = ({ sess, back }) => {
+            const { C, s } = useT();
+            const [tab, setTab] = useState('web');
+            const [tags, setTags] = useState([]);
+            const [details, setDetails] = useState([]);
+            const [webLoading, setWebLoading] = useState(true);
+            const [syncCount, setSyncCount] = useState(0);
+            const webViewRef = useRef(null);
+            useEffect(() => {
+              (async () => {
+                setTags(await getLocalTags());
+                const d = new Date();
+                const detailKey = `TAG_DETAILS_${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+                const dt = await SecureStore.getItemAsync(detailKey);
+                if (dt) setDetails(JSON.parse(dt));
+                const syn = await SecureStore.getItemAsync('SYNCED_SERVER_ATTENDANCE');
+                if (syn) {
+                  const p = JSON.parse(syn);
+                  if (Array.isArray(p)) setSyncCount(p.length);
+                }
+              })();
+            }, []);
+            const onWebMessage = async (event) => {
+              try {
+                const msg = JSON.parse(event.nativeEvent.data);
+                if (msg.type === 'ATTENDANCE_TABLE' && Array.isArray(msg.data) && msg.data.length > 0) {
+                  let merged = msg.data;
+                  try {
+                    const old = await SecureStore.getItemAsync('SYNCED_SERVER_ATTENDANCE');
+                    const oldArr = old ? JSON.parse(old) : [];
+                    merged = mergeAttendance(Array.isArray(oldArr) ? oldArr : [], msg.data);
+                  } catch (_) {}
+                  await SecureStore.setItemAsync('SYNCED_SERVER_ATTENDANCE', JSON.stringify(merged));
+                  setSyncCount(merged.length);
+                }
+              } catch (_) {}
+            };
+            const scraperScript = `
+              (function() {
+                function scrape() {
+                  try {
+                    var rows = document.querySelectorAll('table tr');
+                    var results = [];
+                    for (var i = 0; i < rows.length; i++) {
+                      var cells = rows[i].querySelectorAll('td');
+                      if (cells.length >= 4) {
+                        var dateText = cells[0].innerText.trim();
+                        var dayText = cells[1].innerText.trim();
+                        var inText = cells[2].innerText.trim();
+                        var outText = cells[3].innerText.trim();
+                        var diffText = cells.length > 4 ? cells[4].innerText.trim() : '';
+                        var notesText = cells.length > 5 ? cells[5].innerText.trim() : '';
+                        
+                        if (/\\d+[-/\\.]\\d+[-/\\.]\\d+/.test(dateText)) {
+                          var inMatch = /(\\d{1,2}:\\d{2}\\s*(?:AM|PM)?)/i.exec(inText);
+                          var outMatch = /(\\d{1,2}:\\d{2}\\s*(?:AM|PM)?)/i.exec(outText);
+                          results.push({
+                            date: dateText,
+                            day: dayText,
+                            clockIn: inMatch ? inMatch[1] : '',
+                            clockOut: outMatch ? outMatch[1] : '',
+                            diff: diffText,
+                            notes: notesText
+                          });
+                        }
+                      }
+                    }
+                    if (results.length > 0 && window.ReactNativeWebView) {
+                      var js = JSON.stringify(results);
+                      if (js !== window.__ihrLast) {
+                        window.__ihrLast = js;
+                        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'ATTENDANCE_TABLE', data: results }));
+                      }
+                    }
+                  } catch (e) {}
+                }
+                scrape();
+                setTimeout(scrape, 1500);
+                setTimeout(scrape, 3500);
+                if (!window.__ihrTimer) { window.__ihrTimer = setInterval(scrape, 2500); }
+              })();
+              true;
+            `;
+            return (
+              <View style={{ flex: 1, backgroundColor: C.bg }}>
+                <Top title="Rekod Kehadiran" onBack={back} />
+                
+                {/* Tab Switcher */}
+                <View style={{ flexDirection: 'row', padding: 12, backgroundColor: C.card, borderBottomWidth: 1, borderBottomColor: C.line, gap: 8 }}>
+                  <Pressable
+                    onPress={() => setTab('web')}
+                    style={{
+                      flex: 1,
+                      paddingVertical: 10,
+                      borderRadius: 14,
+                      backgroundColor: tab === 'web' ? C.primary : C.field,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderWidth: 1,
+                      borderColor: tab === 'web' ? C.primary : C.line,
+                    }}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <MaterialIcons name="cloud-sync" size={18} color={tab === 'web' ? C.onPrimary : C.ink} />
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: tab === 'web' ? C.onPrimary : C.ink }}>
+                        Portal MTIB (Live)
+                      </Text>
+                    </View>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => setTab('local')}
+                    style={{
+                      flex: 1,
+                      paddingVertical: 10,
+                      borderRadius: 14,
+                      backgroundColor: tab === 'local' ? C.primary : C.field,
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderWidth: 1,
+                      borderColor: tab === 'local' ? C.primary : C.line,
+                    }}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <MaterialIcons name="devices" size={18} color={tab === 'local' ? C.onPrimary : C.ink} />
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: tab === 'local' ? C.onPrimary : C.ink }}>
+                        Log Peranti
+                      </Text>
+                    </View>
+                  </Pressable>
+                </View>
+                {tab === 'web' ? (
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 8, backgroundColor: C.field, borderBottomWidth: 1, borderBottomColor: C.line }}>
+                      <Text style={{ fontSize: 11, color: syncCount > 0 ? '#2E7D4F' : C.mute, fontWeight: '700' }}>
+                        {syncCount > 0 ? `✓ ${syncCount} rekod diselaraskan` : '🌐 ihr.mtib.gov.my'}
+                      </Text>
+                      <View style={{ flexDirection: 'row', gap: 8 }}>
+                        <Pressable 
+                          onPress={() => webViewRef.current?.reload()} 
+                          style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10, backgroundColor: C.card, borderWidth: 1, borderColor: C.line }}
+                        >
+                          <MaterialIcons name="refresh" size={14} color={C.primary} />
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: C.primary, marginLeft: 4 }}>Segar Semula</Text>
+                        </Pressable>
+                        <Pressable 
+                          onPress={() => Linking.openURL(PORTAL)} 
+                          style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10, backgroundColor: C.card, borderWidth: 1, borderColor: C.line }}
+                        >
+                          <MaterialIcons name="open-in-browser" size={14} color={C.primary} />
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: C.primary, marginLeft: 4 }}>Pelayar</Text>
+                        </Pressable>
+                      </View>
+                    </View>
+                    <WebView
+                      ref={webViewRef}
+                      source={{ uri: PORTAL }}
+                      style={{ flex: 1 }}
+                      injectedJavaScript={scraperScript}
+                      onMessage={onWebMessage}
+                      onLoadStart={() => setWebLoading(true)}
+                      onLoadEnd={() => {
+                        setWebLoading(false);
+                        webViewRef.current?.injectJavaScript(scraperScript);
+                      }}
+                      startInLoadingState={true}
+                      renderLoading={() => (
+                        <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: C.bg }}>
+                          <ActivityIndicator size="large" color={C.primary} />
+                          <Text style={{ marginTop: 12, color: C.mute, fontSize: 13, fontWeight: '600' }}>
+                            Menyegerakkan rekod kehadiran portal ke aplikasi…
+                          </Text>
+                        </View>
+                      )}
+                      javaScriptEnabled={true}
+                      domStorageEnabled={true}
+                      sharedCookiesEnabled={true}
+                      thirdPartyCookiesEnabled={true}
+                    />
+                  </View>
+                ) : (
+                  <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 14 }}>
+                    <Card title="Log Kehadiran Hari Ini (Peranti)" icon="⏱" tint={C.primary}>
+                      {details.length === 0 ? (
+                        <Text style={{ color: C.mute, fontStyle: 'italic', paddingVertical: 8 }}>
+                          Belum ada imbasan atau geotagging yang dibuat pada peranti hari ini.
+                        </Text>
+                      ) : (
+                        details.map((item, index) => {
+                          const timeStr = new Date(item.t).toLocaleTimeString('ms-MY', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                          const isQr = item.m === 'qr';
+                          return (
+                            <View key={index} style={{ paddingVertical: 10, borderBottomWidth: index === details.length - 1 ? 0 : 1, borderBottomColor: C.line }}>
+                              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                  <MaterialIcons name={isQr ? "qr-code-2" : "location-on"} size={20} color={C.primary} />
+                                  <Text style={{ fontSize: 14, fontWeight: '700', color: C.ink }}>
+                                    {isQr ? 'Imbasan Kod QR' : 'Geotagging Foto'}
+                                  </Text>
+                                </View>
+                                <Text style={{ fontSize: 13, fontWeight: '700', color: C.primary }}>{timeStr}</Text>
+                              </View>
+                              <Text style={{ fontSize: 12, color: C.mute, marginTop: 4 }}>
+                                📍 {item.address || (item.lat ? `${item.lat.toFixed(5)}, ${item.lng.toFixed(5)}` : 'Lokasi tidak dikesan')}
+                              </Text>
+                            </View>
+                          );
+                        })
+                      )}
+                    </Card>
+                  </ScrollView>
+                )}
+              </View>
+            );
+          };
+          const ProfileView = ({ sess, back }) => {
+            const { C, s, themeMode, changeTheme } = useT();
+            const name = sess?.name || 'Pengguna';
+            const themeOptions = [
+              { id: 'light', label: 'Cerah', icon: 'light-mode' },
+              { id: 'dark', label: 'Gelap', icon: 'dark-mode' },
+              { id: 'system', label: 'Sistem', icon: 'settings-suggest' },
+            ];
+
+            return (
+              <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 32 }}>
+                <Top title="Profil" onBack={back} />
+                <View style={{ padding: 16, gap: 16 }}>
+                  {/* Maklumat Staf */}
+                  <Card title="Maklumat Staf" icon="👤" tint={C.navy}>
+                    <Row icon="📛" k="Nama Penuh" v={name} tint={C.primary} stack={true} />
+                    <Row icon="🔢" k="No. Staf" v={sess?.staff_no || '-'} tint={C.navy} stack={true} last={true} />
+                  </Card>
+
+                  {/* Tema Aplikasi (Segmented Toggle Modern) */}
+                  <Card title="Tema Aplikasi" icon="🎨" tint={C.primary}>
+                    <Text style={{ color: C.mute, fontSize: 13, marginBottom: 12 }}>
+                      Pilih paparan tema yang dikehendaki:
+                    </Text>
+
+                    {/* Container Segmented Toggle Switch */}
+                    <View style={{
+                      flexDirection: 'row',
+                      backgroundColor: C.field,
+                      padding: 4,
+                      borderRadius: 18,
+                      borderWidth: 1,
+                      borderColor: C.line,
+                      alignItems: 'center',
+                    }}>
+                      {themeOptions.map((opt) => {
+                        const active = themeMode === opt.id;
+                        return (
+                          <Pressable
+                            key={opt.id}
+                            onPress={() => changeTheme && changeTheme(opt.id)}
+                            style={{
+                              flex: 1,
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              paddingVertical: 10,
+                              borderRadius: 14,
+                              backgroundColor: active ? C.primary : 'transparent',
+                              gap: 6,
+                              elevation: active ? 2 : 0,
+                              shadowColor: active ? '#000' : 'transparent',
+                              shadowOpacity: active ? 0.15 : 0,
+                              shadowRadius: 4,
+                              shadowOffset: { width: 0, height: 2 },
+                            }}
+                          >
+                            <MaterialIcons
+                              name={opt.icon}
+                              size={18}
+                              color={active ? C.onPrimary : C.mute}
+                            />
+                            <Text
+                              style={{
+                                fontSize: 13,
+                                fontWeight: active ? '800' : '600',
+                                color: active ? C.onPrimary : C.mute,
+                              }}
+                            >
+                              {opt.label}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </Card>
+
+                  {/* Portal & Pautan */}
+                  <Card title="Portal & Pautan" icon="🔗" tint={C.primary}>
+                    <Text style={{ color: C.mute, fontSize: 12, marginBottom: 10 }}>
+                      Akses terus ke sistem kehadiran dan cuti rasmi MTIB melalui pelayar peranti anda.
+                    </Text>
+                    <Btn 
+                      icon="🌐" 
+                      label="Buka Portal iHR MTIB" 
+                      onPress={() => Linking.openURL('https://ihr.mtib.gov.my')} 
+                      kind="ghost"
+                    />
+                  </Card>
+                </View>
+              </ScrollView>
+            );
+          };
+          function Cam({ mode, sess, back }) {
+            const { C, s } = useT();
+            const [perm, ask] = useCameraPermissions(); const ref = useRef(null); const loc = useFix();
+            const [shot, setShot] = useState(null); const [done, setDone] = useState(false);
+            const [act, setAct] = useState(null); const [actOpen, setActOpen] = useState(false); const [sd, setSd] = useState(todayStr()); const [ed, setEd] = useState(todayStr());
+            const [klType, setKlType] = useState(''); const [reason, setReason] = useState(''); const [opts, setOpts] = useState([]); const [wk, setWk] = useState([]);
+            const [busy, setBusy] = useState(false); const [err, setErr] = useState(''); const [ok, setOk] = useState('');
+            const [askPwd, setAskPwd] = useState(false);
+            const [unlocked, setUnlocked] = useState(false);
+            const [pwd, setPwd] = useState('');
+            const [useLoc, setUseLoc] = useState(true);
+          
+            useEffect(() => { if (perm && !perm.granted) ask(); }, [perm]);
+            useEffect(() => {
+              if (mode !== 'photo') return undefined; let on = true;
+              call(EP.reference, {}).then((r) => { if (!on) return; const m = parseReference(r); if (m) { setOpts(m.outstation); setWk(m.working); } else setErr('Senarai jenis kerja luar tidak dapat dibaca. Respons pelayan: ' + peek(r)); }).catch((e) => { if (on) setErr(e.message); });
+              return () => { on = false; };
+            }, [mode]);
+            
+            const base = { staff_id: sess.staff_id };
+            const need = () => (sess.staff_id ? '' : 'ID staff belum dimuatkan. Kembali ke Dashboard dan tunggu data dimuat.');
+            
+            const onQr = async ({ data }) => {
+              if (done) return; if (need()) return setErr(need()); setDone(true); setBusy(true); setErr('');
+              try {
+                const lat = useLoc ? loc.fix?.latitude : undefined;
+                const lng = useLoc ? loc.fix?.longitude : undefined;
+                const r = await call(EP.qr, { ...base, method: 'qr', qr_code: data, latitude: lat, longitude: lng });
+                await addLocalTag('qr');
+                await saveTagDetails('qr', lat, lng);
+                setOk(typeof r === 'string' ? r : 'Imbasan QR berjaya.');
+              } catch (e) { setErr(e.message); } finally { setBusy(false); }
+            };
+            
+            const pickQr = async () => {
+              const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images });
+              if (!res.canceled && res.assets[0]) {
+                setBusy(true); setErr(''); setDone(true);
+                try {
+                  const scanned = await BarCodeScanner.scanFromURLAsync(res.assets[0].uri);
+                  if (scanned && scanned.length > 0) {
+                    const lat = useLoc ? loc.fix?.latitude : undefined;
+                    const lng = useLoc ? loc.fix?.longitude : undefined;
+                    const r = await call(EP.qr, { ...base, method: 'qr', qr_code: scanned[0].data, latitude: lat, longitude: lng });
+                    await addLocalTag('qr');
+                    await saveTagDetails('qr', lat, lng);
+                    setOk(typeof r === 'string' ? r : 'Muat naik QR berjaya.');
+                  } else {
+                    setErr('Kod QR tidak dikesan dalam gambar.'); setDone(false);
+                  }
+                } catch (e) {
+                  setErr(e.message || 'Ralat membaca gambar QR.'); setDone(false);
+                } finally { setBusy(false); }
+              }
+            };
+            
+            const snap = async () => { 
+              const p = await ref.current?.takePictureAsync({ quality: 0.5 }); 
+              if (p) {
+                const resized = await ImageManipulator.manipulateAsync(
+                  p.uri,
+                  [{ resize: { width: 800 } }],
+                  { compress: 0.5, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+                );
+                setShot(resized); 
+              } 
+            };
+            
+            const sendPhoto = () => {
+              if (need()) return setErr(need()); if (!act) { setActOpen(true); return setErr('Sila pilih jenis kehadiran'); }
+              if (!shot) return setErr('Sila muat naik gambar'); if (!loc.fix) return setErr('Tiada akses lokasi');
+              const payload = { ...base, activity_type: act, latitude: loc.fix.latitude, longitude: loc.fix.longitude, img: shot.base64 };
+              if (act === 3) {
+                if (!klType) return setErr('Sila pilih jenis kerja luar');
+                if (!reason.trim()) return setErr('Sila isi alasan');
+                if (ed < sd) return setErr('Tarikh akhir tidak boleh sebelum tarikh mula');
+                payload.start_date = sd; payload.end_date = ed;
+                const opt = opts.find((o) => o.label === klType);
+                if (!opt || opt.id === undefined) return setErr('Senarai jenis kerja luar belum dimuatkan daripada pelayan. Semak sambungan dan buka semula skrin ini.');
+                const w = wk.find((x) => /kerja\s*luar/i.test(x.label)); if (w) payload.activity_type = w.id;
+                Object.assign(payload, kerjaLuarFields(opt, reason.trim()));
+              }
+              const label = ACTS.find(([v]) => v === act)[1];
+              Alert.alert('Sahkan penghantaran', `Rekod kehadiran "${label}" akan disimpan dalam sistem iHR.`, [
+                { text: 'Batal', style: 'cancel' },
+                { text: 'Hantar', onPress: async () => {
+                  setBusy(true); setErr('');
+                  try { 
+                    const r = await call(EP.geotag, payload); 
+                    await addLocalTag('geo'); 
+                    await saveTagDetails('geo', loc.fix.latitude, loc.fix.longitude);
+                    setOk(typeof r === 'string' ? r : 'Geotagging berjaya dihantar.'); 
+                  } catch (e) { setErr(e.message); } finally { setBusy(false); }
+                } },
+              ]);
+            };
+            
+            if (!perm?.granted) return (<View style={{ flex: 1 }}><Top title="Kamera" onBack={back} /><View style={{ padding: 16, gap: 12 }}><Text style={{ color: C.ink }}>Tiada akses kamera.</Text><Btn label="Benarkan kamera" onPress={ask} /></View></View>);
+            
+            return (
+              <ScrollView keyboardShouldPersistTaps="handled">
+                <Top title={mode === 'qr' ? 'Imbas QR' : 'Geotagging'} onBack={back} onTitleLongPress={() => setAskPwd(!askPwd)} />
+                {askPwd && !unlocked && (
+                  <View style={{ padding: 16, gap: 10 }}>
+                    <TextInput 
+                      style={s.in} 
+                      secureTextEntry 
+                      placeholder="Kata laluan admin" 
+                      placeholderTextColor={C.mute}
+                      value={pwd} 
+                      onChangeText={t => {
+                        setPwd(t);
+                        if (t.trim() === 'Mtib@123') { setUnlocked(true); setAskPwd(false); setPwd(''); }
+                      }}
+                      onSubmitEditing={() => {
+                        if (pwd.trim() === 'Mtib@123') { setUnlocked(true); setAskPwd(false); setPwd(''); }
+                        else { Alert.alert('Ralat', 'Kata laluan salah'); setPwd(''); }
+                      }}
+                    />
+                    <Btn label="Sahkan" onPress={() => {
+                      if (pwd.trim() === 'Mtib@123') { setUnlocked(true); setAskPwd(false); setPwd(''); }
+                      else { Alert.alert('Ralat', 'Kata laluan salah'); setPwd(''); }
+                    }} />
+                  </View>
+                )}
+                {unlocked && (
+                  <View style={{ padding: 16, gap: 10 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <Text style={s.lbl}>Gunakan Lokasi Semasa</Text>
+                      <Switch value={useLoc} onValueChange={setUseLoc} trackColor={{ true: C.primary }} />
+                    </View>
+                    <Text style={s.lbl}>Manual Latitud</Text>
+                    <TextInput style={s.in} keyboardType="numeric" value={String(loc.fix?.latitude || '')} onChangeText={t => loc.setFix(f => ({...f, latitude: parseFloat(t) || 0, accuracy: 1}))} />
+                    <Text style={s.lbl}>Manual Longitud</Text>
+                    <TextInput style={s.in} keyboardType="numeric" value={String(loc.fix?.longitude || '')} onChangeText={t => loc.setFix(f => ({...f, longitude: parseFloat(t) || 0, accuracy: 1}))} />
+                    {mode === 'qr' && (
+                      <Btn label="Muat Naik QR dari Galeri" onPress={pickQr} icon="🖼" kind="ghost" />
+                    )}
+                  </View>
+                )}
+                <View style={{ padding: 16, gap: 14 }}>
+                {shot ? <Image source={{ uri: shot.uri }} style={s.cam} /> :
+                  <CameraView ref={ref} style={s.cam} facing={mode === 'qr' ? 'back' : 'front'} barcodeScannerSettings={{ barcodeTypes: ['qr'] }} onBarcodeScanned={mode === 'qr' ? onQr : undefined} />}
+                {mode === 'photo' ? (shot ? <><Btn icon="📤" label="Hantar gambar" onPress={sendPhoto} busy={busy} /><Btn kind="ghost" icon="🔄" label="Ambil semula" onPress={() => { setShot(null); setOk(''); }} /></> : <Btn icon="📷" label="Ambil Gambar" onPress={snap} />)
+                  : (done && !busy ? <Btn kind="ghost" icon="🔄" label="Imbas semula" onPress={() => { setDone(false); setErr(''); setOk(''); }} /> : <Text style={s.hint}>{busy ? 'Menghantar…' : 'Halakan kamera ke kod QR.'}</Text>)}
+                <Err msg={err} /><Ok msg={ok} />
+                <Loc {...loc} />
+                {mode === 'photo' ? (
+                  <Collapse title="Jenis kehadiran" icon="🗂" tint={C.primary} summary={act ? ACTS.find(([v]) => v === act)[1] : 'Pilih jenis kehadiran'} strong={!!act} open={actOpen} onToggle={() => setActOpen(!actOpen)}>
+                    {ACTS.map(([v, l]) => (<Pressable key={v} onPress={() => { setAct(v); setActOpen(false); }} style={[s.opt, act === v && s.optOn]}><Text style={{ color: act === v ? C.onPrimary : C.ink, fontWeight: '600' }}>{l}</Text></Pressable>))}
+                  </Collapse>
+                ) : null}
+                {mode === 'photo' && act === 3 ? (<Card title="Butiran Kerja Luar" icon="🧳" tint={C.primary}>
+                    <Text style={s.lbl}>Jenis Kerja Luar</Text>
+                    <Select value={klType} placeholder="Pilih Jenis Kerja Luar" options={opts.map((o) => o.label)} onPick={setKlType} />
+                    <Text style={s.lbl}>Alasan</Text>
+                    <TextInput style={[s.in, { minHeight: 48 }]} value={reason} onChangeText={setReason} placeholder="Nyatakan alasan" placeholderTextColor={C.mute} multiline />
+                    <Text style={s.lbl}>Tarikh Mula</Text>
+                    <DateField value={sd} min={todayStr()} onPick={(v) => { setSd(v); if (ed < v) setEd(v); }} />
+                    <Text style={s.lbl}>Tarikh Akhir</Text>
+                    <DateField value={ed} min={sd} onPick={setEd} />
+                </Card>) : null}
+              </View></ScrollView>
+            );
+          }
+          
+          export default function App() {
+            const systemScheme = useColorScheme() === 'dark' ? 'dark' : 'light';
+            const [themeMode, setThemeMode] = useState('system');
+
+            useEffect(() => {
+              SecureStore.getItemAsync('APP_THEME_MODE').then((saved) => {
+                if (saved && ['system', 'light', 'dark'].includes(saved)) {
+                  setThemeMode(saved);
+                }
+              }).catch(() => {});
+            }, []);
+
+            const changeTheme = async (mode) => {
+              setThemeMode(mode);
+              await SecureStore.setItemAsync('APP_THEME_MODE', mode);
+            };
+
+            const activeScheme = themeMode === 'system' ? systemScheme : themeMode;
+            const C = themes[activeScheme] || themes.light;
+            const s = useMemo(() => makeStyles(C), [activeScheme]);
+
+            const [sess, setSess] = useState(undefined); const [view, setView] = useState('home');
+            const [logoutData, setLogoutData] = useState(null);
+            useEffect(() => {
+              loadSession().then(setSess).catch(() => setSess(null));
+            }, []);
+            const home = () => setView('home');
+            let body;
+            const doLogout = () => {
+              Alert.alert('Daftar Keluar', 'Adakah anda pasti mahu kembali ke paparan pendaftaran?', [
+                { text: 'Batal', style: 'cancel' },
+                { text: 'Ya', onPress: async () => { await clearSession(); setLogoutData(sess); setSess(null); setView('home'); } }
+              ]);
+            };
+            if (sess === undefined) body = <View style={s.center}><ActivityIndicator size="large" color={C.primary} /></View>;
+            else if (!sess) body = <Register onDone={setSess} initialName={logoutData?.name || ''} initialNo={logoutData?.staff_no || ''} />;
+            else if (view === 'qr') body = <Cam mode="qr" sess={sess} back={home} />;
+            else if (view === 'geo') body = <Cam mode="photo" sess={sess} back={home} />;
+            else if (view === 'history') body = <HistoryView sess={sess} back={home} />;
+            else if (view === 'profile') body = <ProfileView sess={sess} back={home} />;
+            else body = <Dashboard sess={sess} go={setView} onSess={setSess} onLogout={(oldSess) => { setLogoutData(oldSess); setSess(null); }} />;
+            
+            return (
+              <ThemeCtx.Provider value={{ C, s, scheme: activeScheme, themeMode, changeTheme }}>
+                <SafeAreaView style={s.root}>
+                  <StatusBar style={activeScheme === 'dark' ? 'light' : 'dark'} backgroundColor={C.bg} />
+                  {Platform.OS === 'android' ? <View style={{ height: RNBar.currentHeight || 0, backgroundColor: C.bg }} /> : null}
+                  {body}
+                </SafeAreaView>
+              </ThemeCtx.Provider>
+            );
+          }
+
+          const makeStyles = (C) => StyleSheet.create({
+            root: { flex: 1, backgroundColor: C.bg },
+            center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+            regTopCentered: { alignItems: 'center', paddingVertical: 36 },
+            logo: { color: C.ink, fontSize: 34, fontWeight: '800', letterSpacing: 1 },
+            sub: { color: C.mute, fontSize: 13, marginTop: 4, textAlign: 'center' },
+            dashTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12 },
+            status: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.field, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: C.line },
+            statusT: { fontSize: 11, color: C.mute, fontWeight: '600' },
+            dot: { width: 8, height: 8, borderRadius: 4, marginRight: 6 },
+            profile: { alignItems: 'center', marginVertical: 14, paddingHorizontal: 16 },
+            ring: { width: 92, height: 92, borderRadius: 46, borderWidth: 3, alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
+            ringIn: { width: 80, height: 80, borderRadius: 40, backgroundColor: C.field, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+            ringImg: { width: '100%', height: '100%' },
+            ringT: { fontSize: 32, fontWeight: '800', color: C.primary },
+            pNameBox: { alignItems: 'center', marginBottom: 6 },
+            pName: { fontSize: 20, fontWeight: '800', color: C.ink, textAlign: 'center' },
+            chips: { flexDirection: 'row', gap: 6, marginVertical: 4 },
+            chip: { backgroundColor: C.field, paddingHorizontal: 12, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: C.line },
+            chipT: { fontSize: 12, color: C.mute, fontWeight: '600' },
+            pill: { backgroundColor: C.primarySoft || '#F8E5E1', paddingHorizontal: 14, paddingVertical: 6, borderRadius: 14, marginTop: 6 },
+            pillT: { fontSize: 12, fontWeight: '700', color: C.primary },
+            statRow: { flexDirection: 'row', gap: 10 },
+            stat: { flex: 1, borderRadius: 16, padding: 14, borderWidth: 1 },
+            statH: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+            statL: { fontSize: 12, fontWeight: '700' },
+            statV: { fontSize: 18, fontWeight: '800', color: C.ink },
+            top: { padding: 16, borderBottomWidth: 1, borderBottomColor: C.line, backgroundColor: C.bg },
+            topT: { color: C.ink, fontSize: 20, fontWeight: '800' },
+            card: { backgroundColor: C.card, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: C.line },
+            cardH: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
+            cardT: { fontSize: 16, fontWeight: '800', color: C.ink },
+            row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: C.line },
+            rowK: { color: C.mute, fontSize: 13 },
+            rowV: { color: C.ink, fontSize: 14, fontWeight: '600' },
+            lbl: { color: C.mute, fontSize: 13, marginBottom: 6 },
+            in: { borderWidth: 1, borderColor: C.line, borderRadius: 12, padding: 12, fontSize: 15, backgroundColor: C.field, color: C.ink },
+            btn: { backgroundColor: C.primary, borderRadius: 14, paddingVertical: 14, alignItems: 'center', justifyContent: 'center' },
+            btnGhost: { backgroundColor: 'transparent', borderWidth: 1, borderColor: C.primary },
+            btnIn: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+            btnIc: { fontSize: 16 },
+            btnTx: { color: C.onPrimary, fontWeight: '800', fontSize: 15 },
+            err: { backgroundColor: C.badBg, padding: 10, borderRadius: 10, borderWidth: 1, borderColor: C.badLine },
+            okBox: { backgroundColor: C.okBg, padding: 10, borderRadius: 10, borderWidth: 1, borderColor: C.okLine },
+            hint: { color: C.mute, fontSize: 12, textAlign: 'center', marginTop: 4 },
+            sel: { flexDirection: 'row', alignItems: 'center' },
+            selList: { borderWidth: 1, borderColor: C.line, borderRadius: 12, backgroundColor: C.card, overflow: 'hidden' },
+            selItem: { padding: 12, borderBottomWidth: 1, borderBottomColor: C.line },
+            opt: { padding: 12, borderRadius: 10, borderWidth: 1, borderColor: C.line, marginVertical: 4 },
+            optOn: { backgroundColor: C.primary, borderColor: C.primary },
+            cam: { height: 320, borderRadius: 18, overflow: 'hidden', backgroundColor: '#000' }
+          });
+          IHR_EOF
+          cat > 'src/api.js' <<'IHR_EOF'
+          import * as SecureStore from 'expo-secure-store';
+          import * as Application from 'expo-application';
+          // Recovered from the original iHR 1.0.2 bundle. Method and body shapes are inferred:
+          // confirm them against the backend and adjust here only.
+          export const BASE_URL = 'https://ihr.mtib.gov.my/';
+          export const EP = {
+          register:  { path: 'api/user_registration', method: 'POST', code: 'R', retry: true },
+          dashboard: { path: 'api/dashboard',         method: 'POST', code: 'D', flip: true, retry: true },
+          geotag:    { path: 'api/geotagging',        method: 'POST', code: 'G', retry: true },
+          qr:        { path: 'api/qr_scanner',        method: 'POST', code: 'Q', retry: true },
+          mia:       { path: 'api/mia_report',        method: 'POST', code: 'M', retry: true },
+          reason:    { path: 'api/reason',            method: 'POST', code: 'P', flip: true, retry: true },
+          reference: { path: 'api/reference',         method: 'GET',  code: 'P', flip: true, retry: true },
+          };
+          let override = null;
+          const realId = () => Application.getAndroidId() || 'unknown';
+          export const deviceId = () => override || realId();
+          // Lets the user reuse the ID the server already has for this phone (e.g. from the old iHR app).
+          export async function saveDeviceId(v) {
+            const t = (v || '').trim();
+            if (!t || t === realId()) { override = null; await SecureStore.deleteItemAsync('DEVICE_ID'); }
+            else { override = t; await SecureStore.setItemAsync('DEVICE_ID', t); }
+          }
+          async function once(ep, body, kind, signal) {
+            const get = ep.method === 'GET';
+            const headers = { Accept: 'application/json', imei: String(deviceId()) };
+            let payload, qs = '';
+            if (get) qs = '?' + Object.entries(body).map(([k, v]) => `${k}=${encodeURIComponent(v ?? '')}`).join('&');
+            else if (kind === 'json') { headers['Content-Type'] = 'application/json'; payload = JSON.stringify(body); }
+            else if (kind === 'form') {
+              headers['Content-Type'] = 'application/x-www-form-urlencoded';
+              payload = Object.entries(body).map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v ?? '')}`).join('&');
+            } else { payload = new FormData(); Object.entries(body).forEach(([k, v]) => payload.append(k, String(v ?? ''))); }
+            const res = await fetch(BASE_URL + ep.path + qs, { method: ep.method, headers, body: payload, signal });
+            return { status: res.status, ok: res.ok, text: await res.text() };
+          }
+          // Tries JSON, then form-urlencoded, then multipart when the server rejects the body format.
+          export async function call(ep, body = {}) {
+            // Only read-only endpoints may retry in other body formats; writes are sent exactly once.
+            const kinds = ep.method === 'GET' || !ep.retry ? ['json'] : ['json', 'form', 'multipart'];
+            let last = { status: 0, text: '' };
+            for (let i = 0; i < kinds.length; i++) {
+              const kind = kinds[i];
+              if (kind === 'multipart' && Object.keys(body).length === 0) break; // empty FormData fails on Android
+              const ctl = new AbortController();
+              const t = setTimeout(() => ctl.abort(), 20000);
+              try {
+                const r = await once(ep, body, kind, ctl.signal);
+                if (r.ok) { try { return JSON.parse(r.text); } catch { return { raw: r.text }; } }
+                if (r.status === 405 && ep.flip) {
+                  try {
+                    const g = await once({ ...ep, method: ep.method === 'GET' ? 'POST' : 'GET' }, body, 'json', ctl.signal);
+                    if (g.ok) { try { return JSON.parse(g.text); } catch { return { raw: g.text }; } }
+                  } catch (_) { /* keep the original HTTP error */ }
+                }
+                last = r;
+                if (![400, 405, 415, 422, 500].includes(r.status)) break;
+              } catch (e) {
+                if (i > 0 && last.status) break; // keep the real HTTP error, not a later retry's network error
+                if (e.name === 'AbortError') throw new Error(`[${ep.code}001] Sambungan ke pelayan tamat masa`);
+                throw new Error(`[${ep.code}003] Tiada sambungan ke pelayan (${e.message})`);
+              } finally { clearTimeout(t); }
+            }
+            if (last.status === 413) throw new Error(`[${ep.code}413] Ralat Pelayan. Sila cuba sekali lagi`);
+            // The server often answers with a plain JSON string message (e.g. late clock-in): show it as is.
+            let msg = null; try { const j = JSON.parse(last.text); if (typeof j === 'string') msg = j; else if (j && typeof j.message === 'string' && last.status !== 500) msg = j.message; } catch (_) {}
+            if (msg) throw new Error(`${msg}`);
+            const snip = String(last.text).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 220);
+            throw new Error(`[${ep.code}00${last.status === 404 ? 1 : 2}] Ralat. Sila hubungi Bahagian Sumber Manusia untuk bantuan\nHTTP ${last.status}: ${snip}`);
+          }
+          const K = { no: 'STAFF_NO', id: 'STAFF_ID', name: 'STAFF_NAME' };
+          export async function loadSession() {
+            const dev = await SecureStore.getItemAsync('DEVICE_ID'); if (dev) override = dev;
+            const [staff_no, staff_id, name] = await Promise.all(Object.values(K).map((k) => SecureStore.getItemAsync(k)));
+            return staff_no ? { staff_no, staff_id, name } : null;
+          }
+          export async function saveSession(s) {
+            await SecureStore.setItemAsync(K.no, String(s.staff_no));
+            await SecureStore.setItemAsync(K.id, String(s.staff_id ?? ''));
+            await SecureStore.setItemAsync(K.name, String(s.name ?? ''));
+          }
+          export const clearSession = () => Promise.all(Object.values(K).map((k) => SecureStore.deleteItemAsync(k)));
+          // Times of geotagging sent from this app today (fallback until the server returns first/last tagging).
+          const q2 = (n) => String(n).padStart(2, '0');
+          const dayKey = () => { const d = new Date(); return `TAGS_${d.getFullYear()}-${q2(d.getMonth() + 1)}-${q2(d.getDate())}`; };
+          export async function addLocalTag(method = 'geo') {
+          try { 
+            const k = dayKey(); 
+            const cur = JSON.parse((await SecureStore.getItemAsync(k)) || '[]'); 
+            cur.push({ t: Date.now(), m: method }); 
+            await SecureStore.setItemAsync(k, JSON.stringify(cur.slice(-20))); 
+          } catch (_) { /* optional */ }
+          }
+          export async function getLocalTags() {
+            try { 
+              const raw = JSON.parse((await SecureStore.getItemAsync(dayKey())) || '[]'); 
+              // Format legacy numbers as geo, otherwise return new object structure
+              return raw.map(x => typeof x === 'number' ? { t: x, m: 'geo' } : x);
+            } catch (_) { return []; }
+          }
+          // Turns any server JSON into label/value rows so the dashboard shows whatever the API returns.
+          export function rows(obj, prefix = '', out = []) {
+            if (obj == null || out.length > 30) return out;
+            if (typeof obj !== 'object') { out.push([prefix, String(obj)]); return out; }
+            Object.entries(obj).forEach(([k, v]) => {
+              const key = prefix ? `${prefix} · ${k}` : k;
+              if (v && typeof v === 'object') rows(v, key, out);
+              else if (v !== '' && String(v).length < 120) out.push([key.replace(/_/g, ' '), String(v)]);
+            });
+            return out;
+          }
+          export const unwrap = (r) => (r && (r.data ?? r.staff_data ?? r.result)) ?? r;
+          // ---- Staff photo (shown inside the yellow ring) ----
+          // Finds a photo in the dashboard JSON whatever the field is called: full URL, relative path, or base64.
+          const PHOTO_KEY = /(photo|image|img|picture|pic|avatar|gambar|foto|profile)/i;
+          const NOT_PHOTO = /(color|colour|type|count|msg|status|path_id)/i;
+          function toUri(v) {
+            const s = String(v).trim();
+            if (/^data:image\//i.test(s)) return s;
+            if (/^https?:\/\//i.test(s)) return s.replace(/^http:\/\/ihr\.mtib\.gov\.my/i, 'https://ihr.mtib.gov.my');
+            if (/^[A-Za-z0-9+/=\s]{200,}$/.test(s)) return 'data:image/jpeg;base64,' + s.replace(/\s+/g, '');
+            if (s.length < 300 && !/\s/.test(s) && /[\/.]/.test(s)) return BASE_URL + s.replace(/^\/+/, '');
+            return null;
+          }
+          export function findPhoto(r) {
+            const seen = new Set();
+            const walk = (o, d) => {
+              if (!o || typeof o !== 'object' || d > 3 || seen.has(o)) return null;
+              seen.add(o);
+              for (const [k, v] of Object.entries(o)) {
+                if (typeof v === 'string' && v.length > 3 && PHOTO_KEY.test(k) && !NOT_PHOTO.test(k)) { const u = toUri(v); if (u) return u; }
+              }
+              for (const v of Object.values(o)) { if (v && typeof v === 'object') { const u = walk(v, d + 1); if (u) return u; } }
+              return null;
+            };
+            return walk(r, 0);
+          }
+          // ---- Kerja Luar (outside work) ----
+          export const KERJA_LUAR_TYPES = ['Mesyuarat', 'Kursus', 'Bengkel', 'Lawatan Tapak', 'Pameran', 'Lain-lain'];
+          const norm = (x) => String(x || '').toLowerCase().replace(/[^a-z]/g, '');
+          // Looks for the same six types in the server's reason list and keeps their ids; null if the list is something else.
+          export function matchReasons(r) {
+            const arr = Array.isArray(r) ? r : [r?.data, r?.reasons, r?.reason, r?.result].find(Array.isArray);
+            if (!arr) return null;
+            const items = arr.map((x) => (typeof x === 'string' ? { label: x } : { id: x?.id ?? x?.value ?? x?.code, label: x?.name ?? x?.label ?? x?.reason ?? x?.description ?? x?.title }));
+            const out = KERJA_LUAR_TYPES.map((label) => ({ label, id: items.find((i) => norm(i.label) === norm(label))?.id }));
+            return out.filter((o) => o.id !== undefined).length >= 3 ? out : null;
+          }
+          // Original iHR sends exactly: staff_id, latitude, longitude, activity_type, outstation_type, reason, start_date, end_date, img.
+          // Extra keys make the server answer HTTP 500, so only outstation_type and reason are added here.
+          export const kerjaLuarFields = (opt, reason) => ({ outstation_type: opt?.id, reason });
+          // The dropdown lists come from api/reference: { working_type: [...], outstation_type: [...] } (items are {key, value} in the original).
+          const toOpt = (x, k) => (x && typeof x === 'object'
+            ? { id: x.key ?? x.id ?? x.value ?? x.code, label: String(x.value ?? x.name ?? x.label ?? x.description ?? x.key ?? x.id ?? '') }
+            : (k !== undefined ? { id: k, label: String(x) } : { id: x, label: String(x) }));
+          // Accepts an array, or an object map {id: label}.
+          const toList = (v) => {
+            if (Array.isArray(v)) return v.map((x) => toOpt(x));
+            if (v && typeof v === 'object') return Object.entries(v).map(([k, x]) => toOpt(x, k));
+            return [];
+          };
+          export function parseReference(r) {
+            const seen = new Set(); let out = null, working = null;
+            const walk = (o, d) => {
+              if (!o || typeof o !== 'object' || d > 5 || seen.has(o)) return;
+              seen.add(o);
+              if (!Array.isArray(o)) for (const [k, v] of Object.entries(o)) {
+                if (!out && /outstation|kerja.?luar|outdoor/i.test(k) && v && typeof v === 'object') out = toList(v);
+                else if (!working && /working.?type|activity|attendance.?type/i.test(k) && v && typeof v === 'object') working = toList(v);
+              }
+              for (const v of Object.values(o)) walk(v, d + 1);
+            };
+            walk(r, 0);
+            const clean = (l) => (l || []).filter((o) => o.id !== undefined && o.id !== null && o.label);
+            out = clean(out); working = clean(working);
+            return out.length ? { outstation: out, working } : null;
+          }
+          // Short text of what the server returned, shown when the list cannot be read (for troubleshooting).
+          export const peek = (r) => { try { return JSON.stringify(r).replace(/\s+/g, ' ').slice(0, 300); } catch (_) { return String(r).slice(0, 300); } };
+          IHR_EOF
+          cat > 'src/theme.js' <<'IHR_EOF'
+          // Palette taken from the original iHR screen: warm grey, terracotta buttons, card-color yellow, navy text.
+          // Two palettes: `light` and `dark`. The app picks one from the phone's system theme.
+          export const light = {
+            bg: '#EEEDEE', card: '#FFFFFF', line: '#D9D5D7', ink: '#14141A', mute: '#6B6B75', field: '#FAF9FA',
+            primary: '#BC4A32', primaryText: '#BC4A32', primarySoft: '#F6E4DF', onPrimary: '#FFFFFF',
+            accent: '#FDC107', navy: '#1F2D55', pill: '#CDD3DB',
+            ok: '#2E7D4F', okBg: '#E5F3EA', okLine: '#BFE0CB', bad: '#B3261E', badBg: '#FBE9E7', badLine: '#F2C6C1',
+          };
+          export const dark = {
+            bg: '#121214', card: '#1D1D21', line: '#34343B', ink: '#F2F2F5', mute: '#A3A3AE', field: '#26262B',
+            primary: '#C4513A', primaryText: '#FF8F75', primarySoft: '#3A2420', onPrimary: '#FFFFFF',
+            accent: '#FDC107', navy: '#A9BBEA', pill: '#2B3245',
+            ok: '#7FD6A0', okBg: '#16301F', okLine: '#2C5A40', bad: '#FFB4AB', badBg: '#3C1F1D', badLine: '#6B2E2A',
+          };
+          export const themes = { light, dark };
+          IHR_EOF
+          ls -R . | head -20
       - uses: actions/setup-node@v4
-        with: { node-version: 20 }
-      - uses: actions/setup-java@v4
-        with: { distribution: temurin, java-version: 17 }
-      - run: npm pkg set dependencies.expo-font="~12.0.10"
-        working-directory: ihr-app
-      - run: npm install
-        working-directory: ihr-app
-      - run: npx expo install --fix
-        working-directory: ihr-app
-      - run: npx expo prebuild -p android --no-install
-        working-directory: ihr-app
-      - run: chmod +x gradlew && ./gradlew assembleRelease --no-daemon
-        working-directory: ihr-app/android
-      - uses: actions/upload-artifact@v4
         with:
-          name: iHRv2-apk
-          path: ihr-app/android/app/build/outputs/apk/release/*.apk
+          node-version: 20
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 17
+      - name: Install packages
+        run: npm install --legacy-peer-deps
+        working-directory: app
+      - name: Generate Android project
+        run: npx expo prebuild --platform android --no-install
+        working-directory: app
+      - name: Fix missing splash color
+        run: |
+          F=android/app/src/main/res/values/colors.xml
+          mkdir -p "$(dirname "$F")"
+          [ -f "$F" ] || printf '<resources>\n</resources>\n' > "$F"
+          grep -q splashscreen_background "$F" || sed -i 's|</resources>|  <color name="splashscreen_background">#FFFFFF</color>\n</resources>|' "$F"
+          cat "$F"
+        working-directory: app
+      - name: Point Gradle at the SDK and harden downloads
+        run: |
+          echo "sdk.dir=$ANDROID_HOME" > android/local.properties
+          {
+            echo "systemProp.org.gradle.internal.http.connectionTimeout=180000"
+            echo "systemProp.org.gradle.internal.http.socketTimeout=180000"
+            echo "systemProp.org.gradle.internal.repository.max.retries=8"
+            echo "systemProp.org.gradle.internal.repository.initial.backoff=2000"
+          } >> android/gradle.properties
+        working-directory: app
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('app/package.json') }}
+          restore-keys: gradle-${{ runner.os }}-
+      - name: Build APK (retries on network errors)
+        run: |
+          chmod +x gradlew
+          n=0
+          until ./gradlew assembleRelease --no-daemon; do
+            n=$((n+1))
+            if [ "$n" -ge 3 ]; then echo "Build failed after $n tries"; exit 1; fi
+            echo "Retrying in 30s (try $((n+1)) of 3)..."; sleep 30
+          done
+        working-directory: app/android
+      - name: Create Release and Upload APK
+        uses: softprops/action-gh-release@v2
+        if: success()
+        with:
+          tag_name: "v1.0.8-${{ github.run_number }}"
+          name: "iHR APK Build #${{ github.run_number }}"
+          body: "APK iHR dibina secara automatik melalui GitHub Actions."
+          draft: false
+          prerelease: false
+          files: app/android/app/build/outputs/apk/release/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
