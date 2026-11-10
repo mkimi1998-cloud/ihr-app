@@ -10,6 +10,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Create project files
+        env:
+          BUILD_NUM: ${{ github.run_number }}
         run: |
           set -e
           if [ -f "$GITHUB_WORKSPACE/iHR-source (1).zip" ]; then
@@ -56,7 +58,7 @@ jobs:
           cat > 'babel.config.js' <<'IHR_EOF'
           module.exports = function (api) { api.cache(true); return { presets: ['babel-preset-expo'] }; };
           IHR_EOF
-          cat > 'app.json' <<IHR_EOF
+          cat > 'app.json' <<'IHR_EOF'
           {
             "expo": {
               "name": "iHR",
@@ -67,7 +69,7 @@ jobs:
               "icon": "./assets/icon.png",
               "android": {
                 "package": "my.gov.mtib.ihr.v2",
-                "versionCode": ${{ github.run_number }},
+                "versionCode": 9,
                 "adaptiveIcon": { "foregroundImage": "./assets/adaptive-icon.png", "backgroundColor": "#FFFFFF" },
                 "permissions": [
                   "android.permission.CAMERA",
@@ -100,6 +102,7 @@ jobs:
             }
           }
           IHR_EOF
+          sed -i "s/\"versionCode\": [0-9]*/\"versionCode\": $BUILD_NUM/" app.json
           cat > 'App.js' <<'IHR_EOF'
           import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
           import { ActivityIndicator, Alert, Image, Linking, Platform, Pressable, SafeAreaView, ScrollView, StatusBar as RNBar, StyleSheet, Text, TextInput, useColorScheme, View, Switch, Modal } from 'react-native';
