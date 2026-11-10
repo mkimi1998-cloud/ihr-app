@@ -30,7 +30,7 @@ jobs:
           cat > 'package.json' <<'IHR_EOF'
           {
             "name": "ihr",
-            "version": "1.0.8",
+            "version": "1.0.9",
             "main": "node_modules/expo/AppEntry.js",
             "scripts": { "start": "expo start", "android": "expo run:android" },
             "dependencies": {
@@ -61,13 +61,13 @@ jobs:
             "expo": {
               "name": "iHR",
               "slug": "iHr",
-              "version": "1.0.8",
+              "version": "1.0.9",
               "orientation": "portrait",
               "userInterfaceStyle": "automatic",
               "icon": "./assets/icon.png",
               "android": {
                 "package": "my.gov.mtib.ihr.v2",
-                "versionCode": 8,
+                "versionCode": 9,
               "adaptiveIcon": { "foregroundImage": "./assets/adaptive-icon.png", "backgroundColor": "#FFFFFF" },
                 "permissions": [
                   "android.permission.CAMERA",
@@ -359,7 +359,7 @@ jobs:
                   </Pressable>
                 </View>
                 <View style={{ padding: 16, gap: 14 }}>
-                  <Card title="Pendaftaran Pengguna" icon="👤" tint={C.navy}>
+                  <Card title="Daftar Pengguna Baru" icon="👤" tint={C.navy}>
                     <Text style={s.lbl}>Nama penuh</Text>
                     <TextInput style={s.in} value={name} onChangeText={setName} placeholder="Seperti dalam kad pengenalan" placeholderTextColor={C.mute} />
                     <Text style={s.lbl}>Nombor staff</Text>
@@ -464,7 +464,7 @@ jobs:
               const legacyMethod = isFirst ? firstM : lastM;
               const detail = (isFirst || lastMs === firstMs) ? tagDetails[0] : tagDetails[tagDetails.length - 1];
               if (!timeVal || timeVal === '—') {
-                Alert.alert(title, "Tiada ada rekod kehadiran.");
+                Alert.alert(title, "Belum ada rekod kehadiran.");
                 return;
               }
               
@@ -483,7 +483,7 @@ jobs:
               } else {
                  Alert.alert(
                    `Maklumat ${title}`, 
-                   `Masa: ${timeVal}\n\nRekod ini dikemaskini daripada pelayan web. Maklumat lokasi peranti tidak tersedia.`
+                   `Masa: ${timeVal}\n\nRekod ini disegerakkan daripada pelayan web. Maklumat lokasi peranti tidak tersedia.`
                  );
               }
             };
@@ -1473,7 +1473,7 @@ jobs:
 
                   {/* Kemas Kini & Versi */}
                   <Card title="Kemas Kini & Versi" icon="🔄" tint={C.navy}>
-                    <Row icon="📱" k="Versi Semasa" v={`v${Application.nativeApplicationVersion || '1.0.8'} (${Application.nativeBuildVersion || '8'})`} tint={C.primary} />
+                    <Row icon="📱" k="Versi Semasa" v={`v${Application.nativeApplicationVersion || '1.0.9'} (${Application.nativeBuildVersion || '9'})`} tint={C.primary} />
                     <View style={{ marginTop: 10 }}>
                       <Btn
                         icon="🚀"
@@ -1698,7 +1698,7 @@ jobs:
                 }
                 const release = await res.json();
                 const latestTag = release.tag_name || release.name || '';
-                const currentVer = `${Application.nativeApplicationVersion || '1.0.8'}-${Application.nativeBuildVersion || '8'}`;
+                const currentVer = `${Application.nativeApplicationVersion || '1.0.9'}-${Application.nativeBuildVersion || '9'}`;
                 
                 const apkAsset = (release.assets || []).find((a) => a.name && a.name.toLowerCase().endsWith('.apk'));
                 const downloadUrl = apkAsset ? apkAsset.browser_download_url : release.html_url;
@@ -1992,7 +1992,7 @@ jobs:
           function toUri(v) {
             const s = String(v).trim();
             if (/^data:image\//i.test(s)) return s;
-            if (/^https?:\/\//i.test(s)) return s.replace(/^http:\/\/ihr\.mtib\.gov\.my/i, 'https://ihr.mtib.gov.my');
+            if (/^https?:\/\//i.test(s)) return s.replace(/^http:\/\/ihr\.mtib.gov.my/i, 'https://ihr.mtib.gov.my');
             if (/^[A-Za-z0-9+/=\s]{200,}$/.test(s)) return 'data:image/jpeg;base64,' + s.replace(/\s+/g, '');
             if (s.length < 300 && !/\s/.test(s) && /[\/.]/.test(s)) return BASE_URL + s.replace(/^\/+/, '');
             return null;
@@ -2114,8 +2114,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: success()
         with:
-          tag_name: "v1.0.8-${{ github.run_number }}"
-          name: "iHR APK Build #${{ github.run_number }}"
+          tag_name: "v1.0.9-${{ github.run_number }}"
+          name: "iHR APK Build v1.0.9 #${{ github.run_number }}"
           body: "APK iHR dibina secara automatik melalui GitHub Actions."
           draft: false
           prerelease: false
