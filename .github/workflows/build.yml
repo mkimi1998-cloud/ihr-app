@@ -12,9 +12,9 @@ jobs:
       - name: Create project files
         run: |
           set -e
-          if [ -f "$GITHUB_WORKSPACE/iHR-source.zip" ]; then
-            echo "Mengekstrak iHR-source.zip..."
-            unzip -o "$GITHUB_WORKSPACE/iHR-source.zip" -d "$GITHUB_WORKSPACE/"
+          if [ -f "$GITHUB_WORKSPACE/iHR-source (1).zip" ]; then
+            echo "Mengekstrak iHR-source (1).zip..."
+            unzip -o "$GITHUB_WORKSPACE/iHR-source (1).zip" -d "$GITHUB_WORKSPACE/"
           fi
           mkdir -p app/src
           cd app
@@ -23,7 +23,7 @@ jobs:
             if [ -f "$GITHUB_WORKSPACE/assets/$f" ]; then
               cp "$GITHUB_WORKSPACE/assets/$f" "assets/$f"
             elif [ ! -f "assets/$f" ]; then
-              echo "ERROR: assets/$f tidak dijumpai dalam repo. Pastikan folder assets/ dari iHR-source.zip dimuat naik ke root repo."
+              echo "ERROR: assets/$f tidak dijumpai dalam repo. Pastikan folder assets/ dari iHR-source (1).zip dimuat naik ke root repo."
               exit 1
             fi
           done
