@@ -105,6 +105,7 @@ jobs:
           import { ActivityIndicator, Alert, Image, Linking, Platform, Pressable, SafeAreaView, ScrollView, StatusBar as RNBar, StyleSheet, Text, TextInput, useColorScheme, View, Switch, Modal } from 'react-native';
           import { StatusBar } from 'expo-status-bar';
           import * as Location from 'expo-location';
+          import * as Application from 'expo-application';
           import * as SecureStore from 'expo-secure-store';
           import { CameraView, useCameraPermissions } from 'expo-camera';
           import { MaterialIcons } from '@expo/vector-icons';
@@ -115,6 +116,8 @@ jobs:
           import { BarCodeScanner } from 'expo-barcode-scanner';
           import { themes } from './src/theme';
           import { EP, addLocalTag, call, clearSession, deviceId, findPhoto, getLocalTags, kerjaLuarFields, loadSession, parseReference, peek, saveDeviceId, saveSession, unwrap } from './src/api';
+          
+          const GITHUB_REPO = 'HakimiJaffary/iHR-MTIB';
           const pad = (n) => String(n).padStart(2, '0');
           const t12 = (h, m) => `${pad(h % 12 || 12)}:${pad(m)} ${h < 12 ? 'AM' : 'PM'}`;
           const fromServer = (v) => { const m = /(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})/.exec(String(v || '')); return m ? t12(+m[2], +m[3]) : null; };
@@ -135,6 +138,26 @@ jobs:
           };
           const colorOf = (c, fb) => { const v = String(c ?? '').trim(); return /^[0-9a-f]{6}$/i.test(v) ? '#' + v : v || fb; };
           
+          const parseVersionParts = (v) => {
+            if (!v) return [0, 0, 0, 0];
+            const clean = String(v).replace(/^[vV]/, '').trim();
+            const nums = clean.split(/[-.+_]/).map((n) => parseInt(n, 10) || 0);
+            while (nums.length < 4) nums.push(0);
+            return nums;
+          };
+
+          const isRemoteNewer = (remoteVer, localVer) => {
+            const r = parseVersionParts(remoteVer);
+            const l = parseVersionParts(localVer);
+            for (let i = 0; i < Math.max(r.length, l.length); i++) {
+              const rn = r[i] || 0;
+              const ln = l[i] || 0;
+              if (rn > ln) return true;
+              if (rn < ln) return false;
+            }
+            return false;
+          };
+
           const saveTagDetails = async (method, lat, lng) => {
             try {
               const d = new Date();
@@ -791,7 +814,6 @@ jobs:
 
             const monthNames = ['Januari', 'Februari', 'Mac', 'April', 'Mei', 'Jun', 'Julai', 'Ogos', 'September', 'Oktober', 'November', 'Disember'];
             
-            // Bina senarai bulan: sekurang-kurangnya 12 bulan ke belakang dari hari ini + sebarang rekod server
             const monthSet = new Set();
             for (let b = 0; b < 12; b++) {
               const pastD = new Date(currentYear, currentMonth - b, 1);
@@ -809,7 +831,6 @@ jobs:
               return { k, y: yy, m: mm, label: `Bulan ${mm + 1} (${monthNames[mm]} ${yy})` };
             }).sort((a, b) => (b.y - a.y) || (b.m - a.m));
 
-            // Jana hari mengikut bulan kalendar yang dipilih (contoh: Bulan 11 mempunyai 30 hari penuh)
             const [sy, sm] = (monthSel || `${currentYear}-${currentMonth}`).split('-').map(Number);
             const totalDaysInMonth = new Date(sy, sm + 1, 0).getDate();
             const modalDays = [];
@@ -852,7 +873,6 @@ jobs:
                     </Text>
                   </Pressable>
                 </View>
-                {/* Carta Bar Mingguan */}
                 <View style={{ flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', height: 130, paddingTop: 16 }}>
                   {weekDays.map((item, idx) => {
                     const barHeight = item.hours > 0 ? Math.max((item.hours / maxH) * 85, 20) : 8;
@@ -880,7 +900,6 @@ jobs:
                   })}
                 </View>
                 <View style={{ height: 1, backgroundColor: C.line, marginVertical: 14, opacity: 0.7 }} />
-                {/* 3 Statistik di bawah */}
                 <Pressable onPress={() => setShowAllModal(true)} style={{ flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center' }}>
                   <View style={{ alignItems: 'center' }}>
                     <Text style={{ fontSize: 22, fontWeight: '800', color: '#2E7D4F' }}>{tepatCount}</Text>
@@ -1023,7 +1042,6 @@ jobs:
                         </Pressable>
                       </View>
 
-                      {/* Dropdown Pemilih Bulan */}
                       <View style={{ marginBottom: 12, zIndex: 10 }}>
                         <Text style={{ fontSize: 11, fontWeight: '700', color: C.mute, textTransform: 'uppercase', marginBottom: 4 }}>
                           Pilih Bulan Rekod:
@@ -1051,7 +1069,6 @@ jobs:
                           <MaterialIcons name={dropdownOpen ? "expand-less" : "expand-more"} size={22} color={C.ink} />
                         </Pressable>
 
-                        {/* Senarai Pilihan Dropdown Terbuka */}
                         {dropdownOpen && (
                           <View style={{
                             backgroundColor: C.card,
@@ -1106,7 +1123,6 @@ jobs:
                         )}
                       </View>
 
-                      {/* Senarai Rekod Kehadiran Harian Bulan Yang Dipilih */}
                       <ScrollView style={{ marginVertical: 4 }} showsVerticalScrollIndicator={false}>
                         {modalDays.map((w, idx) => {
                           const isTepat = w.status === 'tepat';
@@ -1252,7 +1268,6 @@ jobs:
               <View style={{ flex: 1, backgroundColor: C.bg }}>
                 <Top title="Rekod Kehadiran" onBack={back} />
                 
-                {/* Tab Switcher */}
                 <View style={{ flexDirection: 'row', padding: 12, backgroundColor: C.card, borderBottomWidth: 1, borderBottomColor: C.line, gap: 8 }}>
                   <Pressable
                     onPress={() => setTab('web')}
@@ -1379,7 +1394,7 @@ jobs:
               </View>
             );
           };
-          const ProfileView = ({ sess, back }) => {
+          const ProfileView = ({ sess, back, onCheckUpdate, checkingUpdate }) => {
             const { C, s, themeMode, changeTheme } = useT();
             const name = sess?.name || 'Pengguna';
             const themeOptions = [
@@ -1453,6 +1468,20 @@ jobs:
                           </Pressable>
                         );
                       })}
+                    </View>
+                  </Card>
+
+                  {/* Kemas Kini & Versi */}
+                  <Card title="Kemas Kini & Versi" icon="🔄" tint={C.navy}>
+                    <Row icon="📱" k="Versi Semasa" v={`v${Application.nativeApplicationVersion || '1.0.8'} (${Application.nativeBuildVersion || '8'})`} tint={C.primary} />
+                    <View style={{ marginTop: 10 }}>
+                      <Btn
+                        icon="🚀"
+                        label={checkingUpdate ? "Menyemak Kemas Kini..." : "Semak Kemas Kini Terkini"}
+                        onPress={() => onCheckUpdate && onCheckUpdate(true)}
+                        kind="ghost"
+                        busy={checkingUpdate}
+                      />
                     </View>
                   </Card>
 
@@ -1641,6 +1670,8 @@ jobs:
           export default function App() {
             const systemScheme = useColorScheme() === 'dark' ? 'dark' : 'light';
             const [themeMode, setThemeMode] = useState('system');
+            const [updateModal, setUpdateModal] = useState(null);
+            const [checkingUpdate, setCheckingUpdate] = useState(false);
 
             useEffect(() => {
               SecureStore.getItemAsync('APP_THEME_MODE').then((saved) => {
@@ -1654,6 +1685,44 @@ jobs:
               setThemeMode(mode);
               await SecureStore.setItemAsync('APP_THEME_MODE', mode);
             };
+
+            const checkForUpdate = useCallback(async (manual = false) => {
+              setCheckingUpdate(true);
+              try {
+                const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, {
+                  headers: { 'Accept': 'application/vnd.github.v3+json' },
+                });
+                if (!res.ok) {
+                  if (manual) Alert.alert('Kemas Kini', 'Tiada maklumat kemas kini ditemui pada masa ini.');
+                  return;
+                }
+                const release = await res.json();
+                const latestTag = release.tag_name || release.name || '';
+                const currentVer = `${Application.nativeApplicationVersion || '1.0.8'}-${Application.nativeBuildVersion || '8'}`;
+                
+                const apkAsset = (release.assets || []).find((a) => a.name && a.name.toLowerCase().endsWith('.apk'));
+                const downloadUrl = apkAsset ? apkAsset.browser_download_url : release.html_url;
+
+                if (isRemoteNewer(latestTag, currentVer)) {
+                  setUpdateModal({
+                    version: latestTag,
+                    current: currentVer,
+                    body: release.body || 'Versi baharu sedia untuk dimuat turun.',
+                    downloadUrl: downloadUrl,
+                  });
+                } else if (manual) {
+                  Alert.alert('Versi Terkini', `Aplikasi anda adalah versi terkini (${currentVer}).`);
+                }
+              } catch (e) {
+                if (manual) Alert.alert('Ralat', 'Gagal menyemak kemas kini. Sila pastikan sambungan internet anda aktif.');
+              } finally {
+                setCheckingUpdate(false);
+              }
+            }, []);
+
+            useEffect(() => {
+              checkForUpdate(false);
+            }, [checkForUpdate]);
 
             const activeScheme = themeMode === 'system' ? systemScheme : themeMode;
             const C = themes[activeScheme] || themes.light;
@@ -1677,7 +1746,7 @@ jobs:
             else if (view === 'qr') body = <Cam mode="qr" sess={sess} back={home} />;
             else if (view === 'geo') body = <Cam mode="photo" sess={sess} back={home} />;
             else if (view === 'history') body = <HistoryView sess={sess} back={home} />;
-            else if (view === 'profile') body = <ProfileView sess={sess} back={home} />;
+            else if (view === 'profile') body = <ProfileView sess={sess} back={home} onCheckUpdate={checkForUpdate} checkingUpdate={checkingUpdate} />;
             else body = <Dashboard sess={sess} go={setView} onSess={setSess} onLogout={(oldSess) => { setLogoutData(oldSess); setSess(null); }} />;
             
             return (
@@ -1686,6 +1755,76 @@ jobs:
                   <StatusBar style={activeScheme === 'dark' ? 'light' : 'dark'} backgroundColor={C.bg} />
                   {Platform.OS === 'android' ? <View style={{ height: RNBar.currentHeight || 0, backgroundColor: C.bg }} /> : null}
                   {body}
+
+                  {/* POP-UP AUTO-UPDATE MODAL */}
+                  <Modal visible={!!updateModal} transparent animationType="fade" onRequestClose={() => setUpdateModal(null)}>
+                    <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', padding: 22 }}>
+                      <View style={{
+                        backgroundColor: C.card,
+                        borderRadius: 26,
+                        width: '100%',
+                        maxWidth: 380,
+                        padding: 24,
+                        borderWidth: 1.5,
+                        borderColor: C.line,
+                        shadowColor: '#000',
+                        shadowOpacity: 0.25,
+                        shadowRadius: 18,
+                        elevation: 10,
+                      }}>
+                        <View style={{ alignItems: 'center', marginBottom: 14 }}>
+                          <View style={{ width: 66, height: 66, borderRadius: 33, backgroundColor: C.primarySoft || '#F8E5E1', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
+                            <MaterialIcons name="system-update" size={36} color={C.primary} />
+                          </View>
+                          <Text style={{ fontSize: 21, fontWeight: '800', color: C.ink, textAlign: 'center' }}>
+                            Kemas Kini Ditemui! 🎉
+                          </Text>
+                          <Text style={{ fontSize: 13, color: C.mute, marginTop: 4, textAlign: 'center' }}>
+                            Versi {updateModal?.version} sedia untuk dimuat turun
+                          </Text>
+                        </View>
+
+                        <View style={{ backgroundColor: C.field, padding: 14, borderRadius: 16, borderWidth: 1, borderColor: C.line, marginBottom: 18 }}>
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: C.mute, textTransform: 'uppercase', marginBottom: 4 }}>
+                            Nota Pelepasan:
+                          </Text>
+                          <Text style={{ fontSize: 13, color: C.ink, lineHeight: 18 }} numberOfLines={5}>
+                            {updateModal?.body}
+                          </Text>
+                        </View>
+
+                        <View style={{ gap: 10 }}>
+                          <Pressable
+                            onPress={() => {
+                              if (updateModal?.downloadUrl) Linking.openURL(updateModal.downloadUrl);
+                              setUpdateModal(null);
+                            }}
+                            style={({ pressed }) => [
+                              s.btn,
+                              { backgroundColor: C.primary },
+                              pressed && { opacity: 0.85 }
+                            ]}
+                          >
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                              <MaterialIcons name="download" size={20} color={C.onPrimary} />
+                              <Text style={[s.btnTx, { color: C.onPrimary }]}>Muat Turun & Pasang</Text>
+                            </View>
+                          </Pressable>
+
+                          <Pressable
+                            onPress={() => setUpdateModal(null)}
+                            style={({ pressed }) => [
+                              s.btn,
+                              s.btnGhost,
+                              pressed && { opacity: 0.7 }
+                            ]}
+                          >
+                            <Text style={[s.btnTx, { color: C.mute }]}>Nanti Sahaja</Text>
+                          </Pressable>
+                        </View>
+                      </View>
+                    </View>
+                  </Modal>
                 </SafeAreaView>
               </ThemeCtx.Provider>
             );
@@ -1747,8 +1886,6 @@ jobs:
           cat > 'src/api.js' <<'IHR_EOF'
           import * as SecureStore from 'expo-secure-store';
           import * as Application from 'expo-application';
-          // Recovered from the original iHR 1.0.2 bundle. Method and body shapes are inferred:
-          // confirm them against the backend and adjust here only.
           export const BASE_URL = 'https://ihr.mtib.gov.my/';
           export const EP = {
           register:  { path: 'api/user_registration', method: 'POST', code: 'R', retry: true },
@@ -1762,7 +1899,6 @@ jobs:
           let override = null;
           const realId = () => Application.getAndroidId() || 'unknown';
           export const deviceId = () => override || realId();
-          // Lets the user reuse the ID the server already has for this phone (e.g. from the old iHR app).
           export async function saveDeviceId(v) {
             const t = (v || '').trim();
             if (!t || t === realId()) { override = null; await SecureStore.deleteItemAsync('DEVICE_ID'); }
@@ -1781,14 +1917,12 @@ jobs:
             const res = await fetch(BASE_URL + ep.path + qs, { method: ep.method, headers, body: payload, signal });
             return { status: res.status, ok: res.ok, text: await res.text() };
           }
-          // Tries JSON, then form-urlencoded, then multipart when the server rejects the body format.
           export async function call(ep, body = {}) {
-            // Only read-only endpoints may retry in other body formats; writes are sent exactly once.
             const kinds = ep.method === 'GET' || !ep.retry ? ['json'] : ['json', 'form', 'multipart'];
             let last = { status: 0, text: '' };
             for (let i = 0; i < kinds.length; i++) {
               const kind = kinds[i];
-              if (kind === 'multipart' && Object.keys(body).length === 0) break; // empty FormData fails on Android
+              if (kind === 'multipart' && Object.keys(body).length === 0) break;
               const ctl = new AbortController();
               const t = setTimeout(() => ctl.abort(), 20000);
               try {
@@ -1798,18 +1932,17 @@ jobs:
                   try {
                     const g = await once({ ...ep, method: ep.method === 'GET' ? 'POST' : 'GET' }, body, 'json', ctl.signal);
                     if (g.ok) { try { return JSON.parse(g.text); } catch { return { raw: g.text }; } }
-                  } catch (_) { /* keep the original HTTP error */ }
+                  } catch (_) { }
                 }
                 last = r;
                 if (![400, 405, 415, 422, 500].includes(r.status)) break;
               } catch (e) {
-                if (i > 0 && last.status) break; // keep the real HTTP error, not a later retry's network error
+                if (i > 0 && last.status) break;
                 if (e.name === 'AbortError') throw new Error(`[${ep.code}001] Sambungan ke pelayan tamat masa`);
                 throw new Error(`[${ep.code}003] Tiada sambungan ke pelayan (${e.message})`);
               } finally { clearTimeout(t); }
             }
             if (last.status === 413) throw new Error(`[${ep.code}413] Ralat Pelayan. Sila cuba sekali lagi`);
-            // The server often answers with a plain JSON string message (e.g. late clock-in): show it as is.
             let msg = null; try { const j = JSON.parse(last.text); if (typeof j === 'string') msg = j; else if (j && typeof j.message === 'string' && last.status !== 500) msg = j.message; } catch (_) {}
             if (msg) throw new Error(`${msg}`);
             const snip = String(last.text).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 220);
@@ -1827,7 +1960,6 @@ jobs:
             await SecureStore.setItemAsync(K.name, String(s.name ?? ''));
           }
           export const clearSession = () => Promise.all(Object.values(K).map((k) => SecureStore.deleteItemAsync(k)));
-          // Times of geotagging sent from this app today (fallback until the server returns first/last tagging).
           const q2 = (n) => String(n).padStart(2, '0');
           const dayKey = () => { const d = new Date(); return `TAGS_${d.getFullYear()}-${q2(d.getMonth() + 1)}-${q2(d.getDate())}`; };
           export async function addLocalTag(method = 'geo') {
@@ -1836,16 +1968,14 @@ jobs:
             const cur = JSON.parse((await SecureStore.getItemAsync(k)) || '[]'); 
             cur.push({ t: Date.now(), m: method }); 
             await SecureStore.setItemAsync(k, JSON.stringify(cur.slice(-20))); 
-          } catch (_) { /* optional */ }
+          } catch (_) { }
           }
           export async function getLocalTags() {
             try { 
               const raw = JSON.parse((await SecureStore.getItemAsync(dayKey())) || '[]'); 
-              // Format legacy numbers as geo, otherwise return new object structure
               return raw.map(x => typeof x === 'number' ? { t: x, m: 'geo' } : x);
             } catch (_) { return []; }
           }
-          // Turns any server JSON into label/value rows so the dashboard shows whatever the API returns.
           export function rows(obj, prefix = '', out = []) {
             if (obj == null || out.length > 30) return out;
             if (typeof obj !== 'object') { out.push([prefix, String(obj)]); return out; }
@@ -1857,8 +1987,6 @@ jobs:
             return out;
           }
           export const unwrap = (r) => (r && (r.data ?? r.staff_data ?? r.result)) ?? r;
-          // ---- Staff photo (shown inside the yellow ring) ----
-          // Finds a photo in the dashboard JSON whatever the field is called: full URL, relative path, or base64.
           const PHOTO_KEY = /(photo|image|img|picture|pic|avatar|gambar|foto|profile)/i;
           const NOT_PHOTO = /(color|colour|type|count|msg|status|path_id)/i;
           function toUri(v) {
@@ -1882,10 +2010,8 @@ jobs:
             };
             return walk(r, 0);
           }
-          // ---- Kerja Luar (outside work) ----
           export const KERJA_LUAR_TYPES = ['Mesyuarat', 'Kursus', 'Bengkel', 'Lawatan Tapak', 'Pameran', 'Lain-lain'];
           const norm = (x) => String(x || '').toLowerCase().replace(/[^a-z]/g, '');
-          // Looks for the same six types in the server's reason list and keeps their ids; null if the list is something else.
           export function matchReasons(r) {
             const arr = Array.isArray(r) ? r : [r?.data, r?.reasons, r?.reason, r?.result].find(Array.isArray);
             if (!arr) return null;
@@ -1893,14 +2019,10 @@ jobs:
             const out = KERJA_LUAR_TYPES.map((label) => ({ label, id: items.find((i) => norm(i.label) === norm(label))?.id }));
             return out.filter((o) => o.id !== undefined).length >= 3 ? out : null;
           }
-          // Original iHR sends exactly: staff_id, latitude, longitude, activity_type, outstation_type, reason, start_date, end_date, img.
-          // Extra keys make the server answer HTTP 500, so only outstation_type and reason are added here.
           export const kerjaLuarFields = (opt, reason) => ({ outstation_type: opt?.id, reason });
-          // The dropdown lists come from api/reference: { working_type: [...], outstation_type: [...] } (items are {key, value} in the original).
           const toOpt = (x, k) => (x && typeof x === 'object'
             ? { id: x.key ?? x.id ?? x.value ?? x.code, label: String(x.value ?? x.name ?? x.label ?? x.description ?? x.key ?? x.id ?? '') }
             : (k !== undefined ? { id: k, label: String(x) } : { id: x, label: String(x) }));
-          // Accepts an array, or an object map {id: label}.
           const toList = (v) => {
             if (Array.isArray(v)) return v.map((x) => toOpt(x));
             if (v && typeof v === 'object') return Object.entries(v).map(([k, x]) => toOpt(x, k));
@@ -1922,12 +2044,9 @@ jobs:
             out = clean(out); working = clean(working);
             return out.length ? { outstation: out, working } : null;
           }
-          // Short text of what the server returned, shown when the list cannot be read (for troubleshooting).
           export const peek = (r) => { try { return JSON.stringify(r).replace(/\s+/g, ' ').slice(0, 300); } catch (_) { return String(r).slice(0, 300); } };
           IHR_EOF
           cat > 'src/theme.js' <<'IHR_EOF'
-          // Palette taken from the original iHR screen: warm grey, terracotta buttons, card-color yellow, navy text.
-          // Two palettes: `light` and `dark`. The app picks one from the phone's system theme.
           export const light = {
             bg: '#EEEDEE', card: '#FFFFFF', line: '#D9D5D7', ink: '#14141A', mute: '#6B6B75', field: '#FAF9FA',
             primary: '#BC4A32', primaryText: '#BC4A32', primarySoft: '#F6E4DF', onPrimary: '#FFFFFF',
