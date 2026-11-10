@@ -56,7 +56,7 @@ jobs:
           cat > 'babel.config.js' <<'IHR_EOF'
           module.exports = function (api) { api.cache(true); return { presets: ['babel-preset-expo'] }; };
           IHR_EOF
-          cat > 'app.json' <<'IHR_EOF'
+          cat > 'app.json' <<IHR_EOF
           {
             "expo": {
               "name": "iHR",
@@ -68,7 +68,7 @@ jobs:
               "android": {
                 "package": "my.gov.mtib.ihr.v2",
                 "versionCode": ${{ github.run_number }},
-              "adaptiveIcon": { "foregroundImage": "./assets/adaptive-icon.png", "backgroundColor": "#FFFFFF" },
+                "adaptiveIcon": { "foregroundImage": "./assets/adaptive-icon.png", "backgroundColor": "#FFFFFF" },
                 "permissions": [
                   "android.permission.CAMERA",
                   "android.permission.ACCESS_COARSE_LOCATION",
@@ -141,7 +141,6 @@ jobs:
           const parseVersionParts = (v) => {
             if (!v) return [0, 0, 0, 0];
             const clean = String(v).replace(/^[vV]/, '').trim();
-            // Ambil semua nombor berturutan (cth: "1.0.9-20" -> [1, 0, 9, 20])
             const matched = clean.match(/\d+/g);
             if (!matched) return [0, 0, 0, 0];
             const nums = matched.map((n) => parseInt(n, 10) || 0);
@@ -1476,7 +1475,7 @@ jobs:
 
                   {/* Kemas Kini & Versi */}
                   <Card title="Kemas Kini & Versi" icon="🔄" tint={C.navy}>
-                    <Row icon="📱" k="Versi Semasa" v={`v${Application.nativeApplicationVersion || '1.0.9'} (${Application.nativeBuildVersion || '9'})`} tint={C.primary} />
+                    <Row icon="📱" k="Versi Semasa" v={`v${Application.nativeApplicationVersion || '1.0.9'} (Build #${Application.nativeBuildVersion || '1'})`} tint={C.primary} />
                     <View style={{ marginTop: 10 }}>
                       <Btn
                         icon="🚀"
@@ -1695,22 +1694,22 @@ jobs:
                 const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`, {
                   headers: { 
                     'Accept': 'application/vnd.github.v3+json',
-                    'User-Agent': 'iHR-App-Updater' // Wajib untuk elak sekatan 403 GitHub API
+                    'User-Agent': 'iHR-App-Updater'
                   },
                 });
 
                 if (!res.ok) {
-                  if (manual) Alert.alert('Kemas Kini', `Ralat pelayan GitHub (HTTP ${res.status}). Sila cuba sebentar lagi.`);
+                  if (manual) Alert.alert('Kemas Kini', `Ralat sambungan GitHub (HTTP ${res.status}). Sila cuba lagi.`);
                   return;
                 }
 
                 const release = await res.json();
                 const latestTag = release.tag_name || release.name || '';
                 
-                // Dapatkan versi aplikasi semasa yang dipasang
-                const appVer = Application.nativeApplicationVersion || '1.0.8';
-                const buildVer = Application.nativeBuildVersion || '8';
-                const currentVer = `${appVer}-${buildVer}`;
+                // Baca versi aplikasi dan nombor build code sebenar dari sistem Android
+                const appVer = Application.nativeApplicationVersion || '1.0.9';
+                const buildCode = Application.nativeBuildVersion || '';
+                const currentVer = buildCode ? `${appVer}-${buildCode}` : appVer;
                 
                 const apkAsset = (release.assets || []).find((a) => a.name && a.name.toLowerCase().endsWith('.apk'));
                 const downloadUrl = apkAsset ? apkAsset.browser_download_url : release.html_url;
@@ -1723,7 +1722,7 @@ jobs:
                     downloadUrl: downloadUrl,
                   });
                 } else if (manual) {
-                  Alert.alert('Versi Terkini', `Aplikasi anda adalah versi terkini (${currentVer}) berbanding pelayan (${latestTag}).`);
+                  Alert.alert('Versi Terkini', `Aplikasi anda adalah versi terkini (${currentVer}).`);
                 }
               } catch (e) {
                 if (manual) Alert.alert('Ralat', `Gagal menyemak kemas kini: ${e.message}`);
@@ -2004,7 +2003,7 @@ jobs:
           function toUri(v) {
             const s = String(v).trim();
             if (/^data:image\//i.test(s)) return s;
-            if (/^https?:\/\//i.test(s)) return s.replace(/^http:\/\/ihr\.mtib.gov.my/i, 'https://ihr.mtib.gov.my');
+            if (/^https?:\/\//i.test(s)) return s.replace(/^http:\/\/ihr\.mtib\.gov\.my/i, 'https://ihr.mtib.gov.my');
             if (/^[A-Za-z0-9+/=\s]{200,}$/.test(s)) return 'data:image/jpeg;base64,' + s.replace(/\s+/g, '');
             if (s.length < 300 && !/\s/.test(s) && /[\/.]/.test(s)) return BASE_URL + s.replace(/^\/+/, '');
             return null;
