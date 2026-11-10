@@ -359,7 +359,7 @@ jobs:
                   </Pressable>
                 </View>
                 <View style={{ padding: 16, gap: 14 }}>
-                  <Card title="Daftar Pengguna Baru" icon="👤" tint={C.navy}>
+                  <Card title="Pendaftaran Pengguna" icon="👤" tint={C.navy}>
                     <Text style={s.lbl}>Nama penuh</Text>
                     <TextInput style={s.in} value={name} onChangeText={setName} placeholder="Seperti dalam kad pengenalan" placeholderTextColor={C.mute} />
                     <Text style={s.lbl}>Nombor staff</Text>
@@ -464,7 +464,7 @@ jobs:
               const legacyMethod = isFirst ? firstM : lastM;
               const detail = (isFirst || lastMs === firstMs) ? tagDetails[0] : tagDetails[tagDetails.length - 1];
               if (!timeVal || timeVal === '—') {
-                Alert.alert(title, "Belum ada rekod kehadiran.");
+                Alert.alert(title, "Tiada ada rekod kehadiran.");
                 return;
               }
               
@@ -483,7 +483,7 @@ jobs:
               } else {
                  Alert.alert(
                    `Maklumat ${title}`, 
-                   `Masa: ${timeVal}\n\nRekod ini disegerakkan daripada pelayan web. Maklumat lokasi peranti tidak tersedia.`
+                   `Masa: ${timeVal}\n\nRekod ini dikemaskini daripada pelayan web. Maklumat lokasi peranti tidak tersedia.`
                  );
               }
             };
