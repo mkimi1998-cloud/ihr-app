@@ -515,7 +515,7 @@ jobs:
                         {busy ? <ActivityIndicator size="small" color={C.primaryText} /> : (
                           <>
                             <MaterialIcons name="sync" size={16} color={C.primaryText} />
-                            <Text style={{ fontSize: 12, color: C.primaryText, fontWeight: '700', marginLeft: 4 }}>Refresh</Text>
+                            <Text style={{ fontSize: 12, color: C.primaryText, fontWeight: '700', marginLeft: 4 }}></Text>
                           </>
                         )}
                       </Pressable>
