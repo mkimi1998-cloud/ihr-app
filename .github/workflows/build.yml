@@ -540,15 +540,32 @@ jobs:
                   {data ? <View style={s.pill}><Text style={s.pillT}>{data.msg?.clock_in || 'Belum ada rekod waktu masuk hari ini.'}</Text></View> : null}
                 </View>
                 
-                <View style={{ paddingHorizontal: 16, gap: 14 }}>
-                  <View style={{ alignItems: 'center', backgroundColor: C.card, paddingVertical: 18, borderRadius: 20, borderWidth: 1, borderColor: C.line, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 8, elevation: 2 }}>
-                    <Text style={{ fontSize: 38, fontWeight: '800', color: C.ink, letterSpacing: 1, fontVariant: ['tabular-nums'] }}>
+                <View style={s.profile}>
+                  <View style={{ alignItems: 'center', backgroundColor: C.card, paddingVertical: 8, paddingHorizontal: 16, borderRadius: 14, borderWidth: 1, borderColor: C.line, marginBottom: 12 }}>
+                    <Text style={{ fontSize: 18, fontWeight: '800', color: C.ink, letterSpacing: 0.5, fontVariant: ['tabular-nums'] }}>
                       {now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                     </Text>
-                    <Text style={{ fontSize: 14, color: C.primary, fontWeight: '700', marginTop: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                    <Text style={{ fontSize: 11, color: C.primary, fontWeight: '700', marginTop: 2, textTransform: 'uppercase', letterSpacing: 0.4 }}>
                       {now.toLocaleDateString('ms-MY', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
                     </Text>
                   </View>
+
+                  <Pressable onLongPress={() => Alert.alert('Medan data pelayan', data ? `${Object.keys(data).join(', ')}\n\nstaff_data: ${Object.keys(sd).join(', ') || '-'}\n\nGambar: ${photo ? 'dijumpai' : 'tiada'}` : 'Tiada data')}>
+                    <View style={[s.ring, { borderColor: ring }]}><View style={s.ringIn}>
+                      {photo && !badPhoto ? <Image source={photo.startsWith('data:') ? { uri: photo } : { uri: photo, headers: { imei: String(deviceId()) } }} style={s.ringImg} resizeMode="cover" onError={() => setBadPhoto(true)} /> : <Text style={s.ringT}>{name.trim()[0]?.toUpperCase() || 'I'}</Text>}
+                    </View></View>
+                  </Pressable>
+                  <View style={s.pNameBox}>
+                    <Text style={{ color: C.mute, fontSize: 16, fontWeight: '700', marginBottom: 4 }}>{greeting},</Text>
+                    {wrapName(name).map((l, i) => <Text key={i} style={s.pName} numberOfLines={1}>{l}</Text>)}
+                  </View>
+                  <View style={s.chips}>
+                    <View style={s.chip}><Text style={s.chipT}>No. staff {sd.staff_no ?? sess.staff_no}</Text></View>
+                  </View>
+                  {data ? <View style={s.pill}><Text style={s.pillT}>{data.msg?.clock_in || 'Belum ada rekod waktu masuk hari ini.'}</Text></View> : null}
+                </View>
+                
+                <View style={{ paddingHorizontal: 16, gap: 14 }}>
                   <View style={s.statRow}>
                     <Stat icon="📍" label="Waktu Masuk" value={first || '—'} tint={C.primary} methodIcon={firstM ? getMethodIcon(firstM) : null} onPress={() => showTagInfo('First Tagging', true)} />
                     <Stat icon="📌" label="Waktu Keluar" value={last || '—'} tint={C.navy} methodIcon={lastM ? getMethodIcon(lastM) : null} onPress={() => showTagInfo('Last Tagging', false)} />
