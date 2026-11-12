@@ -551,8 +551,8 @@ jobs:
                 
                 <View style={{ paddingHorizontal: 16, gap: 14 }}>
                   <View style={s.statRow}>
-                    <Stat icon="📍" label="Waktu Masuk" value={first || '—'} tint={C.primary} methodIcon={firstM ? getMethodIcon(firstM) : null} onPress={() => showTagInfo('First Tagging', true)} />
-                    <Stat icon="📌" label="Waktu Keluar" value={last || '—'} tint={C.navy} methodIcon={lastM ? getMethodIcon(lastM) : null} onPress={() => showTagInfo('Last Tagging', false)} />
+                    <Stat icon="📍" label="Waktu Masuk" value={first || '—'} tint={C.primary} methodIcon={firstM ? getMethodIcon(firstM) : null} onPress={() => showTagInfo('Waktu Masuk', true)} />
+                    <Stat icon="📌" label="Waktu Keluar" value={last || '—'} tint={C.navy} methodIcon={lastM ? getMethodIcon(lastM) : null} onPress={() => showTagInfo('Waktu Keluar', false)} />
                   </View>
                   <QuickActionBar go={go} />
                   <WeeklySummaryCard tags={tags} todayFirst={first} todayLast={last} />
