@@ -150,7 +150,6 @@ jobs:
             while (nums.length < 4) nums.push(0);
             return nums;
           };
-
           const isRemoteNewer = (remoteVer, localVer) => {
             const r = parseVersionParts(remoteVer);
             const l = parseVersionParts(localVer);
@@ -162,7 +161,6 @@ jobs:
             }
             return false;
           };
-
           const saveTagDetails = async (method, lat, lng) => {
             try {
               const d = new Date();
@@ -533,7 +531,6 @@ jobs:
                       {now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                     </Text>
                   </View>
-
                   <Pressable onLongPress={() => Alert.alert('Medan data pelayan', data ? `${Object.keys(data).join(', ')}\n\nstaff_data: ${Object.keys(sd).join(', ') || '-'}\n\nGambar: ${photo ? 'dijumpai' : 'tiada'}` : 'Tiada data')}>
                     <View style={[s.ring, { borderColor: ring }]}><View style={s.ringIn}>
                       {photo && !badPhoto ? <Image source={photo.startsWith('data:') ? { uri: photo } : { uri: photo, headers: { imei: String(deviceId()) } }} style={s.ringImg} resizeMode="cover" onError={() => setBadPhoto(true)} /> : <Text style={s.ringT}>{name.trim()[0]?.toUpperCase() || 'I'}</Text>}
@@ -656,18 +653,15 @@ jobs:
             const [selectedDay, setSelectedDay] = useState(null);
             const [showMonthModal, setShowMonthModal] = useState(false);
             const [serverRows, setServerRows] = useState([]);
-
             const today = new Date();
             const currentYear = today.getFullYear();
             const currentMonth = today.getMonth();
-
             const monthNames = [
               'Januari', 'Februari', 'Mac', 'April', 'Mei', 'Jun',
               'Julai', 'Ogos', 'September', 'Oktober', 'November', 'Disember'
             ];
             const dayNames = ['Ahd', 'Isn', 'Sel', 'Rab', 'Kha', 'Jum', 'Sab'];
             const fullDayNames = ['Ahad', 'Isnin', 'Selasa', 'Rabu', 'Khamis', 'Jumaat', 'Sabtu'];
-
             useEffect(() => {
               const fetchServerData = async () => {
                 try {
@@ -684,7 +678,6 @@ jobs:
               const timer = setInterval(fetchServerData, 20000);
               return () => clearInterval(timer);
             }, []);
-
             const parseTimeStr = (str) => {
               if (!str || str === '—' || str === '-') return null;
               const m = /(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)?/i.exec(String(str).trim());
@@ -696,21 +689,18 @@ jobs:
               if (ampm === 'AM' && hr === 12) hr = 0;
               return { hr, mn, totalMins: hr * 60 + mn };
             };
-
             const buildDay = (d) => {
               const dayIdx = d.getDay();
               const isToday = d.toDateString() === today.toDateString();
               const isPast = d <= today;
               const isWeekend = dayIdx === 0 || dayIdx === 6;
               const dateFormatted = `${d.getDate()} ${monthNames[d.getMonth()].slice(0, 3)} ${d.getFullYear()}`;
-
               let hours = 0;
               let status = 'tiada';
               let inTime = '—';
               let outTime = '—';
               let notes = '';
               let hasServerMatch = false;
-
               if (serverRows.length > 0) {
                 const matched = serverRows.find((r) => {
                   const parts = String(r.date || '').trim().split(/[-/.]/);
@@ -725,13 +715,11 @@ jobs:
                   }
                   return false;
                 });
-
                 if (matched) {
                   hasServerMatch = true;
                   inTime = matched.clockIn ? matched.clockIn : (isToday && todayFirst ? todayFirst : '—');
                   outTime = matched.clockOut ? matched.clockOut : (isToday && todayLast ? todayLast : '—');
                   notes = matched.notes || '';
-
                   if (inTime !== '—') {
                     const parsedIn = parseTimeStr(inTime);
                     if (parsedIn) {
@@ -740,7 +728,6 @@ jobs:
                     } else {
                       status = 'tepat';
                     }
-
                     if (outTime !== '—') {
                       const parsedOut = parseTimeStr(outTime);
                       if (parsedIn && parsedOut) {
@@ -763,18 +750,15 @@ jobs:
                   }
                 }
               }
-
               if (!hasServerMatch && isToday && todayFirst) {
                 inTime = todayFirst;
                 outTime = todayLast || todayFirst;
                 status = 'tepat';
                 hours = 8.0;
-
                 const parsedIn = parseTimeStr(todayFirst);
                 if (parsedIn && (parsedIn.hr > 9 || (parsedIn.hr === 9 && parsedIn.mn > 0))) {
                   status = 'lewat';
                 }
-
                 if (todayLast && todayLast !== todayFirst) {
                   const parsedOut = parseTimeStr(todayLast);
                   if (parsedIn && parsedOut) {
@@ -783,7 +767,6 @@ jobs:
                   }
                 }
               }
-
               return {
                 dayLabel: dayNames[dayIdx],
                 fullDay: fullDayNames[dayIdx],
@@ -798,17 +781,14 @@ jobs:
                 synced: hasServerMatch,
               };
             };
-
             const currentDayOfWeek = today.getDay();
             const startOfWeek = new Date(today);
             startOfWeek.setDate(today.getDate() - currentDayOfWeek);
-
             const weekDays = [];
             let tepatCount = 0;
             let lewatCount = 0;
             let tiadaCount = 0;
             let totalWeekHours = 0;
-
             for (let i = 0; i < 7; i++) {
               const d = new Date(startOfWeek);
               d.setDate(startOfWeek.getDate() + i);
@@ -816,15 +796,12 @@ jobs:
               if (item.status === 'tepat') tepatCount++;
               else if (item.status === 'lewat') lewatCount++;
               else tiadaCount++;
-
               if (item.hours > 0) totalWeekHours += item.hours;
               weekDays.push(item);
             }
-
             const daysInCurrentMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
             const currentMonthDays = [];
             let mMonthTepat = 0, mMonthLewat = 0, mMonthTiada = 0;
-
             for (let dayNum = daysInCurrentMonth; dayNum >= 1; dayNum--) {
               const item = buildDay(new Date(currentYear, currentMonth, dayNum, 12, 0, 0));
               if (item.status === 'tepat') mMonthTepat++;
@@ -832,11 +809,9 @@ jobs:
               else mMonthTiada++;
               currentMonthDays.push(item);
             }
-
             const maxBarHeight = 85;
             const maxVal = Math.max(...weekDays.map((w) => w.hours), 9.0);
             const avgHours = (totalWeekHours / (tepatCount + lewatCount || 1)).toFixed(1);
-
             return (
               <View style={{
                 backgroundColor: C.card,
@@ -858,7 +833,6 @@ jobs:
                       <Text style={{ fontSize: 11, fontWeight: '800', color: C.primary }}>Live</Text>
                     </View>
                   </Pressable>
-
                   <Pressable
                     onPress={() => setShowMonthModal(true)}
                     style={({ pressed }) => [{
@@ -880,7 +854,6 @@ jobs:
                     <MaterialIcons name="chevron-right" size={16} color={C.mute} />
                   </Pressable>
                 </View>
-
                 <View style={{
                   flexDirection: 'row',
                   alignItems: 'flex-end',
@@ -893,7 +866,6 @@ jobs:
                     const fillPercent = item.hours > 0 ? Math.min(item.hours / maxVal, 1.0) : 0;
                     const barFillHeight = item.hours > 0 ? Math.max(fillPercent * maxBarHeight, 18) : 0;
                     const barColor = item.status === 'tepat' ? C.primary : item.status === 'lewat' ? '#D97706' : 'transparent';
-
                     return (
                       <Pressable
                         key={idx}
@@ -911,7 +883,6 @@ jobs:
                         }}>
                           {item.hours > 0 ? `${item.hours}j` : '-'}
                         </Text>
-
                         <View style={{
                           width: 34,
                           height: maxBarHeight,
@@ -941,7 +912,6 @@ jobs:
                             }} />
                           )}
                         </View>
-
                         <View style={{ alignItems: 'center', marginTop: 8 }}>
                           <Text style={{
                             fontSize: 11,
@@ -963,26 +933,21 @@ jobs:
                     );
                   })}
                 </View>
-
                 <View style={{ height: 1, backgroundColor: C.line, marginVertical: 14, opacity: 0.6 }} />
-
                 <Pressable onPress={() => setShowMonthModal(true)} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 6 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: C.primary }} />
                     <Text style={{ fontSize: 13, fontWeight: '800', color: C.ink }}>{tepatCount} <Text style={{ fontSize: 11, fontWeight: '600', color: C.mute }}>Tepat</Text></Text>
                   </View>
-
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#D97706' }} />
                     <Text style={{ fontSize: 13, fontWeight: '800', color: '#D97706' }}>{lewatCount} <Text style={{ fontSize: 11, fontWeight: '600', color: C.mute }}>Lewat</Text></Text>
                   </View>
-
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     <MaterialIcons name="timelapse" size={14} color={C.primary} />
-                    <Text style={{ fontSize: 13, fontWeight: '800', color: C.ink }}>{avgHours}jam <Text style={{ fontSize: 11, fontWeight: '600', color: C.mute }}>Purata</Text></Text>
+                    <Text style={{ fontSize: 13, fontWeight: '800', color: C.ink }}>{avgHours}j <Text style={{ fontSize: 11, fontWeight: '600', color: C.mute }}>Purata</Text></Text>
                   </View>
                 </Pressable>
-
                 <Modal visible={!!selectedDay} transparent animationType="fade" onRequestClose={() => setSelectedDay(null)}>
                   <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
                     <View style={{
@@ -1020,7 +985,6 @@ jobs:
                           </Text>
                         </View>
                       </View>
-
                       <View style={{ flexDirection: 'row', gap: 12, marginVertical: 18 }}>
                         <View style={{
                           flex: 1,
@@ -1037,7 +1001,6 @@ jobs:
                           </View>
                           <Text style={{ fontSize: 16, fontWeight: '800', color: C.ink }}>{selectedDay?.inTime}</Text>
                         </View>
-
                         <View style={{
                           flex: 1,
                           backgroundColor: C.field,
@@ -1054,7 +1017,6 @@ jobs:
                           <Text style={{ fontSize: 16, fontWeight: '800', color: C.ink }}>{selectedDay?.outTime}</Text>
                         </View>
                       </View>
-
                       <View style={{
                         backgroundColor: C.primarySoft || '#F8E5E1',
                         borderRadius: 16,
@@ -1076,12 +1038,10 @@ jobs:
                           {selectedDay?.hours > 0 ? `${selectedDay.hours} Jam` : '—'}
                         </Text>
                       </View>
-
                       <Btn label="Tutup" onPress={() => setSelectedDay(null)} />
                     </View>
                   </View>
                 </Modal>
-
                 <Modal visible={showMonthModal} transparent animationType="slide" onRequestClose={() => setShowMonthModal(false)}>
                   <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'flex-end' }}>
                     <View style={{
@@ -1110,7 +1070,6 @@ jobs:
                           <Text style={{ fontSize: 16, color: C.mute, fontWeight: '800' }}>✕</Text>
                         </Pressable>
                       </View>
-
                       <ScrollView style={{ marginVertical: 6 }} showsVerticalScrollIndicator={false}>
                         {currentMonthDays.map((w, idx) => {
                           const isTepat = w.status === 'tepat';
@@ -1160,7 +1119,6 @@ jobs:
                           );
                         })}
                       </ScrollView>
-
                       <View style={{ marginTop: 10 }}>
                         <Btn label="Tutup Rekod Bulan" onPress={() => setShowMonthModal(false)} />
                       </View>
@@ -1391,7 +1349,6 @@ jobs:
               { id: 'dark', label: 'Gelap', icon: 'dark-mode' },
               { id: 'system', label: 'Sistem', icon: 'settings-suggest' },
             ];
-
             return (
               <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 32 }}>
                 <Top title="Profil" onBack={back} />
@@ -1401,13 +1358,11 @@ jobs:
                     <Row icon="📛" k="Nama Penuh" v={name} tint={C.primary} stack={true} />
                     <Row icon="🔢" k="No. Staf" v={sess?.staff_no || '-'} tint={C.navy} stack={true} last={true} />
                   </Card>
-
                   {/* Tema Aplikasi (Segmented Toggle Modern) */}
                   <Card title="Tema Aplikasi" icon="🎨" tint={C.primary}>
                     <Text style={{ color: C.mute, fontSize: 13, marginBottom: 12 }}>
                       Pilih paparan tema yang dikehendaki:
                     </Text>
-
                     {/* Container Segmented Toggle Switch */}
                     <View style={{
                       flexDirection: 'row',
@@ -1459,7 +1414,6 @@ jobs:
                       })}
                     </View>
                   </Card>
-
                   {/* Kemas Kini & Versi */}
                   <Card title="Kemas Kini & Versi" icon="🔄" tint={C.navy}>
                     <Row icon="📱" k="Versi Semasa" v={`v${Application.nativeApplicationVersion || '1.0.9'} (Build #${Application.nativeBuildVersion || '1'})`} tint={C.primary} />
@@ -1473,7 +1427,6 @@ jobs:
                       />
                     </View>
                   </Card>
-
                   {/* Portal & Pautan */}
                   <Card title="Portal & Pautan" icon="🔗" tint={C.primary}>
                     <Text style={{ color: C.mute, fontSize: 12, marginBottom: 10 }}>
@@ -1651,7 +1604,7 @@ jobs:
                     <Text style={s.lbl}>Tarikh Akhir</Text>
                     <DateField value={ed} min={sd} onPick={setEd} />
                 </Card>) : null}
-                 <Loc {...loc} />
+                <Loc {...loc} />
               </View></ScrollView>
             );
           }
@@ -1661,7 +1614,6 @@ jobs:
             const [themeMode, setThemeMode] = useState('system');
             const [updateModal, setUpdateModal] = useState(null);
             const [checkingUpdate, setCheckingUpdate] = useState(false);
-
             useEffect(() => {
               SecureStore.getItemAsync('APP_THEME_MODE').then((saved) => {
                 if (saved && ['system', 'light', 'dark'].includes(saved)) {
@@ -1669,12 +1621,10 @@ jobs:
                 }
               }).catch(() => {});
             }, []);
-
             const changeTheme = async (mode) => {
               setThemeMode(mode);
               await SecureStore.setItemAsync('APP_THEME_MODE', mode);
             };
-
             const checkForUpdate = useCallback(async (manual = false) => {
               setCheckingUpdate(true);
               try {
@@ -1684,12 +1634,10 @@ jobs:
                     'User-Agent': 'iHR-App-Updater'
                   },
                 });
-
                 if (!res.ok) {
                   if (manual) Alert.alert('Kemas Kini', `Ralat sambungan GitHub (HTTP ${res.status}). Sila cuba lagi.`);
                   return;
                 }
-
                 const release = await res.json();
                 const latestTag = release.tag_name || release.name || '';
                 
@@ -1700,7 +1648,6 @@ jobs:
                 
                 const apkAsset = (release.assets || []).find((a) => a.name && a.name.toLowerCase().endsWith('.apk'));
                 const downloadUrl = apkAsset ? apkAsset.browser_download_url : release.html_url;
-
                 if (isRemoteNewer(latestTag, currentVer)) {
                   setUpdateModal({
                     version: latestTag,
@@ -1717,15 +1664,12 @@ jobs:
                 setCheckingUpdate(false);
               }
             }, []);
-
             useEffect(() => {
               checkForUpdate(false);
             }, [checkForUpdate]);
-
             const activeScheme = themeMode === 'system' ? systemScheme : themeMode;
             const C = themes[activeScheme] || themes.light;
             const s = useMemo(() => makeStyles(C), [activeScheme]);
-
             const [sess, setSess] = useState(undefined); const [view, setView] = useState('home');
             const [logoutData, setLogoutData] = useState(null);
             useEffect(() => {
@@ -1753,7 +1697,6 @@ jobs:
                   <StatusBar style={activeScheme === 'dark' ? 'light' : 'dark'} backgroundColor={C.bg} />
                   {Platform.OS === 'android' ? <View style={{ height: RNBar.currentHeight || 0, backgroundColor: C.bg }} /> : null}
                   {body}
-
                   {/* POP-UP AUTO-UPDATE MODAL */}
                   <Modal visible={!!updateModal} transparent animationType="fade" onRequestClose={() => setUpdateModal(null)}>
                     <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center', padding: 22 }}>
@@ -1781,7 +1724,6 @@ jobs:
                             Versi {updateModal?.version} sedia untuk dimuat turun
                           </Text>
                         </View>
-
                         <View style={{ backgroundColor: C.field, padding: 14, borderRadius: 16, borderWidth: 1, borderColor: C.line, marginBottom: 18 }}>
                           <Text style={{ fontSize: 11, fontWeight: '700', color: C.mute, textTransform: 'uppercase', marginBottom: 4 }}>
                             Nota Pelepasan:
@@ -1790,7 +1732,6 @@ jobs:
                             {updateModal?.body}
                           </Text>
                         </View>
-
                         <View style={{ gap: 10 }}>
                           <Pressable
                             onPress={() => {
@@ -1808,7 +1749,6 @@ jobs:
                               <Text style={[s.btnTx, { color: C.onPrimary }]}>Muat Turun & Pasang</Text>
                             </View>
                           </Pressable>
-
                           <Pressable
                             onPress={() => setUpdateModal(null)}
                             style={({ pressed }) => [
@@ -1827,7 +1767,6 @@ jobs:
               </ThemeCtx.Provider>
             );
           }
-
           const makeStyles = (C) => StyleSheet.create({
             root: { flex: 1, backgroundColor: C.bg },
             center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
