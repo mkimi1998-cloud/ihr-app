@@ -359,7 +359,7 @@ jobs:
                 <View style={s.regTopCentered}>
                   <Pressable onLongPress={() => setAdv(!adv)} delayLongPress={1500} style={{ alignItems: 'center' }}>
                     <Image source={require('./assets/icon.png')} style={{ width: 90, height: 90, marginBottom: 12 }} resizeMode="contain" />
-                    <Text style={s.logo}>iHR</Text>
+                    <Text style={s.logo}>iHR Kehadiran</Text>
                     <Text style={s.sub}>Lembaga Perindustrian Kayu Malaysia</Text>
                   </Pressable>
                 </View>
@@ -507,7 +507,7 @@ jobs:
                   <View style={{ alignItems: 'flex-end' }}>
                     <Pressable onPress={handleLogout} style={s.status}>
                       <View style={[s.dot, { backgroundColor: online == null ? C.mute : online ? C.ok : C.bad }]} />
-                      <Text style={s.statusT}>{online == null ? 'Menyemak…' : online ? `Online ${at}` : 'Offline'}</Text>
+                      <Text style={s.statusT}>{online == null ? 'Menyemak…' : online ? `Online` : 'Offline'}</Text>
                     </Pressable>
                     <View style={{ flexDirection: 'row', gap: 6, marginTop: 8 }}>
                       <Pressable onPress={() => changeTheme(themeMode === 'dark' ? 'light' : 'dark')} hitSlop={10} style={{ paddingHorizontal: 8, paddingVertical: 6, flexDirection: 'row', alignItems: 'center', backgroundColor: C.field, borderRadius: 14, borderWidth: 1, borderColor: C.line }}>
@@ -546,7 +546,7 @@ jobs:
                   <View style={s.chips}>
                     <View style={s.chip}><Text style={s.chipT}>No. staff {sd.staff_no ?? sess.staff_no}</Text></View>
                   </View>
-                  {data ? <View style={s.pill}><Text style={s.pillT}>{data.msg?.clock_in || 'Belum ada rekod waktu masuk hari ini.'}</Text></View> : null}
+                  {data ? <View style={[s.pill, { display: 'none' }]}><Text style={s.pillT}>{data.msg?.clock_in || 'Belum ada rekod waktu masuk hari ini.'}</Text></View> : null}
                 </View>
                 
                 <View style={{ paddingHorizontal: 16, gap: 14 }}>
@@ -1274,7 +1274,7 @@ jobs:
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                       <MaterialIcons name="cloud-sync" size={18} color={tab === 'web' ? C.onPrimary : C.ink} />
                       <Text style={{ fontSize: 13, fontWeight: '700', color: tab === 'web' ? C.onPrimary : C.ink }}>
-                        Portal MTIB (Live)
+                        Portal iHR
                       </Text>
                     </View>
                   </Pressable>
@@ -1338,7 +1338,7 @@ jobs:
                         <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: C.bg }}>
                           <ActivityIndicator size="large" color={C.primary} />
                           <Text style={{ marginTop: 12, color: C.mute, fontSize: 13, fontWeight: '600' }}>
-                            Menyegerakkan rekod kehadiran portal ke aplikasi…
+                            Sila tunggu rekod kehadiran portal ke aplikasi…
                           </Text>
                         </View>
                       )}
@@ -1854,7 +1854,7 @@ jobs:
             stat: { flex: 1, borderRadius: 16, padding: 14, borderWidth: 1 },
             statH: { flexDirection: 'row', alignItems: 'center', gap: 6 },
             statL: { fontSize: 12, fontWeight: '700' },
-            statV: { fontSize: 18, fontWeight: '800', color: C.ink },
+            statV: { fontSize: 20, fontWeight: '800', color: C.ink },
             top: { padding: 16, borderBottomWidth: 1, borderBottomColor: C.line, backgroundColor: C.bg },
             topT: { color: C.ink, fontSize: 20, fontWeight: '800' },
             card: { backgroundColor: C.card, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: C.line },
