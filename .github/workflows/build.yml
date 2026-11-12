@@ -359,7 +359,7 @@ jobs:
                 <View style={s.regTopCentered}>
                   <Pressable onLongPress={() => setAdv(!adv)} delayLongPress={1500} style={{ alignItems: 'center' }}>
                     <Image source={require('./assets/icon.png')} style={{ width: 90, height: 90, marginBottom: 12 }} resizeMode="contain" />
-                    <Text style={s.logo}>iHR Kehadiran</Text>
+                    <Text style={s.logo}>iHR</Text>
                     <Text style={s.sub}>Lembaga Perindustrian Kayu Malaysia</Text>
                   </Pressable>
                 </View>
@@ -502,7 +502,7 @@ jobs:
                     <View style={{ backgroundColor: '#fff', borderRadius: 8, padding: 2 }}>
                        <Image source={require('./assets/icon.png')} style={{ width: 36, height: 36 }} resizeMode="contain" />
                     </View>
-                    <Text style={{ color: C.ink, fontSize: 32, fontWeight: '800', letterSpacing: 0.5 }}>iHR</Text>
+                    <Text style={{ color: C.ink, fontSize: 32, fontWeight: '800', letterSpacing: 0.5 }}>iHR Kehadiran</Text>
                   </View>
                   <View style={{ alignItems: 'flex-end' }}>
                     <Pressable onPress={handleLogout} style={s.status}>
@@ -979,7 +979,7 @@ jobs:
 
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     <MaterialIcons name="timelapse" size={14} color={C.primary} />
-                    <Text style={{ fontSize: 13, fontWeight: '800', color: C.ink }}>{avgHours}j <Text style={{ fontSize: 11, fontWeight: '600', color: C.mute }}>Purata</Text></Text>
+                    <Text style={{ fontSize: 13, fontWeight: '800', color: C.ink }}>{avgHours}jam <Text style={{ fontSize: 11, fontWeight: '600', color: C.mute }}>Purata</Text></Text>
                   </View>
                 </Pressable>
 
@@ -1636,7 +1636,6 @@ jobs:
                 {mode === 'photo' ? (shot ? <><Btn icon="📤" label="Hantar gambar" onPress={sendPhoto} busy={busy} /><Btn kind="ghost" icon="🔄" label="Ambil semula" onPress={() => { setShot(null); setOk(''); }} /></> : <Btn icon="📷" label="Ambil Gambar" onPress={snap} />)
                   : (done && !busy ? <Btn kind="ghost" icon="🔄" label="Imbas semula" onPress={() => { setDone(false); setErr(''); setOk(''); }} /> : <Text style={s.hint}>{busy ? 'Menghantar…' : 'Halakan kamera ke kod QR.'}</Text>)}
                 <Err msg={err} /><Ok msg={ok} />
-                <Loc {...loc} />
                 {mode === 'photo' ? (
                   <Collapse title="Jenis kehadiran" icon="🗂" tint={C.primary} summary={act ? ACTS.find(([v]) => v === act)[1] : 'Pilih jenis kehadiran'} strong={!!act} open={actOpen} onToggle={() => setActOpen(!actOpen)}>
                     {ACTS.map(([v, l]) => (<Pressable key={v} onPress={() => { setAct(v); setActOpen(false); }} style={[s.opt, act === v && s.optOn]}><Text style={{ color: act === v ? C.onPrimary : C.ink, fontWeight: '600' }}>{l}</Text></Pressable>))}
@@ -1652,6 +1651,7 @@ jobs:
                     <Text style={s.lbl}>Tarikh Akhir</Text>
                     <DateField value={ed} min={sd} onPick={setEd} />
                 </Card>) : null}
+                 <Loc {...loc} />
               </View></ScrollView>
             );
           }
