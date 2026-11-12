@@ -469,7 +469,7 @@ jobs:
               const legacyMethod = isFirst ? firstM : lastM;
               const detail = (isFirst || lastMs === firstMs) ? tagDetails[0] : tagDetails[tagDetails.length - 1];
               if (!timeVal || timeVal === '—') {
-                Alert.alert(title, "Belum ada rekod kehadiran.");
+                Alert.alert(title, "Tiada rekod kehadiran.");
                 return;
               }
               
@@ -488,7 +488,7 @@ jobs:
               } else {
                  Alert.alert(
                    `Maklumat ${title}`, 
-                   `Masa: ${timeVal}\n\nRekod ini disegerakkan daripada pelayan web. Maklumat lokasi peranti tidak tersedia.`
+                   `Masa: ${timeVal}\n\nRekod ini daripada pelayan web. Maklumat lokasi peranti tidak tersedia.`
                  );
               }
             };
@@ -507,7 +507,7 @@ jobs:
                   <View style={{ alignItems: 'flex-end' }}>
                     <Pressable onPress={handleLogout} style={s.status}>
                       <View style={[s.dot, { backgroundColor: online == null ? C.mute : online ? C.ok : C.bad }]} />
-                      <Text style={s.statusT}>{online == null ? 'Menyemak…' : online ? `Online ${at}` : 'Luar talian'}</Text>
+                      <Text style={s.statusT}>{online == null ? 'Menyemak…' : online ? `Online ${at}` : 'Offline'}</Text>
                     </Pressable>
                     <View style={{ flexDirection: 'row', gap: 6, marginTop: 8 }}>
                       <Pressable onPress={() => changeTheme(themeMode === 'dark' ? 'light' : 'dark')} hitSlop={10} style={{ paddingHorizontal: 8, paddingVertical: 6, flexDirection: 'row', alignItems: 'center', backgroundColor: C.field, borderRadius: 14, borderWidth: 1, borderColor: C.line }}>
@@ -525,12 +525,12 @@ jobs:
                   </View>
                 </View>
                 <View style={s.profile}>
-                  <View style={{ alignItems: 'center', backgroundColor: C.card, paddingVertical: 8, paddingHorizontal: 16, borderRadius: 14, borderWidth: 1, borderColor: C.line, marginBottom: 12 }}>
-                    <Text style={{ fontSize: 18, fontWeight: '800', color: C.ink, letterSpacing: 0.5, fontVariant: ['tabular-nums'] }}>
-                      {now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                    </Text>
-                    <Text style={{ fontSize: 11, color: C.primary, fontWeight: '700', marginTop: 2, textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                  <Text style={{ fontSize: 11, color: C.primary, fontWeight: '700', marginTop: 2, textTransform: 'uppercase', letterSpacing: 0.4 }}>
                       {now.toLocaleDateString('ms-MY', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                    </Text>
+                  <View style={{ alignItems: 'center', backgroundColor: C.card, paddingVertical: 8, paddingHorizontal: 16, borderRadius: 14, borderWidth: 1, borderColor: C.line, marginBottom: 12 }}>
+                    <Text style={{ fontSize: 12, fontWeight: '800', color: C.ink, letterSpacing: 0.5, fontVariant: ['tabular-nums'] }}>
+                      {now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                     </Text>
                   </View>
 
@@ -601,7 +601,7 @@ jobs:
             const items = [
               { id: 'qr', label: 'Imbas QR', icon: 'qr-code-2' },
               { id: 'geo', label: 'Geo Tagging', icon: 'location-on' },
-              { id: 'history', label: 'Sejarah', icon: 'access-time' },
+              { id: 'history', label: 'Log Kehadiran', icon: 'access-time' },
               { id: 'profile', label: 'Profil', icon: 'person-outline' },
             ];
             return (
