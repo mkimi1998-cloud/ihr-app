@@ -105,7 +105,7 @@ jobs:
           sed -i "s/\"versionCode\": [0-9]*/\"versionCode\": $BUILD_NUM/" app.json
           cat > 'App.js' <<'IHR_EOF'
           import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-          import { ActivityIndicator, Alert, Image, Linking, Platform, Pressable, SafeAreaView, ScrollView, StatusBar as RNBar, StyleSheet, Text, TextInput, useColorScheme, View, Switch, Modal } from 'react-native';
+          import { ActivityIndicator, Alert, BackHandler, Image, Linking, Platform, Pressable, SafeAreaView, ScrollView, StatusBar as RNBar, StyleSheet, Text, TextInput, useColorScheme, View, Switch, Modal } from 'react-native';
           import { StatusBar } from 'expo-status-bar';
           import * as Location from 'expo-location';
           import * as Application from 'expo-application';
@@ -1676,6 +1676,23 @@ jobs:
               loadSession().then(setSess).catch(() => setSess(null));
             }, []);
             const home = () => setView('home');
+
+            useEffect(() => {
+              const onBackPress = () => {
+                if (updateModal) {
+                  setUpdateModal(null);
+                  return true;
+                }
+                if (sess && view !== 'home') {
+                  setView('home');
+                  return true;
+                }
+                return false;
+              };
+
+              const sub = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+              return () => sub.remove();
+            }, [sess, view, updateModal]);
             let body;
             const doLogout = () => {
               Alert.alert('Daftar Keluar', 'Adakah anda pasti mahu kembali ke paparan pendaftaran?', [
