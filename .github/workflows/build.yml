@@ -2080,7 +2080,7 @@ jobs:
         with:
           tag_name: "v1.1.0-${{ github.run_number }}"
           name: "iHR APK Build v1.0.9 #${{ github.run_number }}"
-          body: "Update Patch, Jadual  Ringkasan 7 Hari."
+          body: "Update Patch : New Update "
           draft: false
           prerelease: false
           files: app/android/app/build/outputs/apk/release/*.apk
