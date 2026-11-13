@@ -552,7 +552,7 @@ jobs:
                     <Stat icon="📌" label="Waktu Keluar" value={last || '—'} tint={C.navy} methodIcon={lastM ? getMethodIcon(lastM) : null} onPress={() => showTagInfo('Waktu Keluar', false)} />
                   </View>
                   <QuickActionBar go={go} />
-                  <WeeklySummaryCard tags={tags} todayFirst={first} todayLast={last} />
+                  {/*<WeeklySummaryCard tags={tags} todayFirst={first} todayLast={last} />}
                   
                   <Err msg={err} />
                   {busy && !data ? <ActivityIndicator color={C.primaryText} /> : null}
@@ -1136,20 +1136,28 @@ jobs:
             const [webLoading, setWebLoading] = useState(true);
             const [syncCount, setSyncCount] = useState(0);
             const webViewRef = useRef(null);
-            useEffect(() => {
-              (async () => {
-                setTags(await getLocalTags());
-                const d = new Date();
-                const detailKey = `TAG_DETAILS_${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-                const dt = await SecureStore.getItemAsync(detailKey);
-                if (dt) setDetails(JSON.parse(dt));
-                const syn = await SecureStore.getItemAsync('SYNCED_SERVER_ATTENDANCE');
-                if (syn) {
-                  const p = JSON.parse(syn);
-                  if (Array.isArray(p)) setSyncCount(p.length);
-                }
-              })();
+
+            const loadLocalData = useCallback(async () => {
+              setTags(await getLocalTags());
+              const d = new Date();
+              const detailKey = `TAG_DETAILS_${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+              const dt = await SecureStore.getItemAsync(detailKey);
+              if (dt) setDetails(JSON.parse(dt));
+              const syn = await SecureStore.getItemAsync('SYNCED_SERVER_ATTENDANCE');
+              if (syn) {
+                const p = JSON.parse(syn);
+                if (Array.isArray(p)) setSyncCount(p.length);
+              }
             }, []);
+
+            useEffect(() => {
+              loadLocalData();
+            }, [loadLocalData]);
+
+            const sortedTags = [...tags].sort((a, b) => a.t - b.t);
+            const todayFirst = sortedTags.length ? fromMs(sortedTags[0].t) : null;
+            const todayLast = sortedTags.length > 1 ? fromMs(sortedTags[sortedTags.length - 1].t) : todayFirst;
+
             const onWebMessage = async (event) => {
               try {
                 const msg = JSON.parse(event.nativeEvent.data);
@@ -1181,9 +1189,9 @@ jobs:
                         var diffText = cells.length > 4 ? cells[4].innerText.trim() : '';
                         var notesText = cells.length > 5 ? cells[5].innerText.trim() : '';
                         
-                        if (/\d+[-/\.]\d+[-/\.]\d+/.test(dateText)) {
-                          var inMatch = /(\d{1,2}:\d{2}\s*(?:AM|PM)?)/i.exec(inText);
-                          var outMatch = /(\d{1,2}:\d{2}\s*(?:AM|PM)?)/i.exec(outText);
+                        if (/\\d+[-/\\.]\\d+[-/\\.]\\d+/.test(dateText)) {
+                          var inMatch = /(\\d{1,2}:\\d{2}\\s*(?:AM|PM)?)/i.exec(inText);
+                          var outMatch = /(\\d{1,2}:\\d{2}\\s*(?:AM|PM)?)/i.exec(outText);
                           results.push({
                             date: dateText,
                             day: dayText,
@@ -1237,7 +1245,7 @@ jobs:
                     </View>
                   </Pressable>
                   <Pressable
-                    onPress={() => setTab('local')}
+                    onPress={() => { setTab('local'); loadLocalData(); }}
                     style={{
                       flex: 1,
                       paddingVertical: 10,
@@ -1307,7 +1315,9 @@ jobs:
                     />
                   </View>
                 ) : (
-                  <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 14 }}>
+                  <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: 28 }}>
+                    <WeeklySummaryCard tags={tags} todayFirst={todayFirst} todayLast={todayLast} />
+
                     <Card title="Log Kehadiran Hari Ini (Peranti)" icon="⏱" tint={C.primary}>
                       {details.length === 0 ? (
                         <Text style={{ color: C.mute, fontStyle: 'italic', paddingVertical: 8 }}>
