@@ -552,7 +552,7 @@ jobs:
                     <Stat icon="📌" label="Waktu Keluar" value={last || '—'} tint={C.navy} methodIcon={lastM ? getMethodIcon(lastM) : null} onPress={() => showTagInfo('Waktu Keluar', false)} />
                   </View>
                   <QuickActionBar go={go} />
-                  {/*<WeeklySummaryCard tags={tags} todayFirst={first} todayLast={last} />}
+                  {/* <WeeklySummaryCard tags={tags} todayFirst={first} todayLast={last} /> */}
                   
                   <Err msg={err} />
                   {busy && !data ? <ActivityIndicator color={C.primaryText} /> : null}
@@ -2029,7 +2029,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
