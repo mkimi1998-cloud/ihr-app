@@ -1351,6 +1351,136 @@ jobs:
               </View>
             );
           };
+          function QrGeneratorView({ sess, back }) {
+            const { C, s } = useT();
+            const loc = useFix();
+            const [qrValue, setQrValue] = useState('');
+            const [savedCode, setSavedCode] = useState('');
+            const [busy, setBusy] = useState(false);
+            const [err, setErr] = useState('');
+            const [ok, setOk] = useState('');
+
+            useEffect(() => {
+              SecureStore.getItemAsync('CUSTOM_QR_CODE').then((v) => {
+                if (v) {
+                  setQrValue(v);
+                  setSavedCode(v);
+                }
+              }).catch(() => {});
+            }, []);
+
+            const generateQr = async () => {
+              const clean = qrValue.trim();
+              if (!clean) return setErr('Sila masukkan kod QR atau IMEI peranti dari jadual attendance_devices.');
+              setErr('');
+              setOk('');
+              setSavedCode(clean);
+              await SecureStore.setItemAsync('CUSTOM_QR_CODE', clean);
+            };
+
+            const submitSelfAttendance = () => {
+              if (!sess?.staff_id) return setErr('ID staff belum dimuatkan. Kembali ke Dashboard dan tunggu data dimuat.');
+              if (!savedCode) return setErr('Sila jana kod QR terlebih dahulu.');
+
+              Alert.alert(
+                'Sahkan Kehadiran QR',
+                `Rekod kehadiran menggunakan kod "${savedCode}" ke sistem iHR?`,
+                [
+                  { text: 'Batal', style: 'cancel' },
+                  {
+                    text: 'Hantar',
+                    onPress: async () => {
+                      setBusy(true);
+                      setErr('');
+                      setOk('');
+                      try {
+                        const lat = loc.fix?.latitude;
+                        const lng = loc.fix?.longitude;
+                        const r = await call(EP.qr, {
+                          staff_id: sess.staff_id,
+                          method: 'qr',
+                          qr_code: savedCode,
+                          latitude: lat,
+                          longitude: lng,
+                        });
+                        await addLocalTag('qr');
+                        await saveTagDetails('qr', lat, lng);
+                        setOk(typeof r === 'string' ? r : (r?.message || 'Kehadiran QR berjaya direkodkan.'));
+                      } catch (e) {
+                        setErr(e.message);
+                      } finally {
+                        setBusy(false);
+                      }
+                    },
+                  },
+                ]
+              );
+            };
+
+            const qrImageUrl = savedCode
+              ? `https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=12&data=${encodeURIComponent(savedCode)}`
+              : null;
+
+            return (
+              <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 32 }}>
+                <Top title="Jana Kod QR" onBack={back} />
+                <View style={{ padding: 16, gap: 14 }}>
+                  <Card title="Tetapan Kod QR (attendance_devices)" icon="📱" tint={C.primary}>
+                    <Text style={s.lbl}>
+                      Masukkan nilai `imei` atau kod lokasi yang berdaftar dalam `attendance_devices`:
+                    </Text>
+                    <TextInput
+                      style={s.in}
+                      value={qrValue}
+                      onChangeText={setQrValue}
+                      placeholder="Contoh: TEST-QR-MTIB-001"
+                      placeholderTextColor={C.mute}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
+                    <View style={{ marginTop: 12 }}>
+                      <Btn icon="⚡" label="Jana QR" onPress={generateQr} />
+                    </View>
+                  </Card>
+
+                  {qrImageUrl ? (
+                    <Card title="Paparan Kod QR" icon="🔲" tint={C.navy}>
+                      <View style={{ alignItems: 'center', paddingVertical: 12 }}>
+                        <View style={{ backgroundColor: '#FFFFFF', padding: 14, borderRadius: 18, borderWidth: 1, borderColor: C.line }}>
+                          <Image
+                            source={{ uri: qrImageUrl }}
+                            style={{ width: 220, height: 220 }}
+                            resizeMode="contain"
+                          />
+                        </View>
+                        <Text style={{ color: C.ink, fontWeight: '700', fontSize: 14, marginTop: 12 }} selectable>
+                          {savedCode}
+                        </Text>
+                        <Text style={{ color: C.mute, fontSize: 11, marginTop: 4, textAlign: 'center' }}>
+                          Imbas QR ini dari peranti lain atau tekan butang di bawah untuk rekod terus pada telefon ini.
+                        </Text>
+                      </View>
+
+                      <View style={{ marginTop: 8, gap: 10 }}>
+                        <Err msg={err} />
+                        <Ok msg={ok} />
+                        <Btn
+                          icon="✅"
+                          label="Rekod Kehadiran (Guna QR Ini)"
+                          onPress={submitSelfAttendance}
+                          busy={busy}
+                        />
+                      </View>
+                    </Card>
+                  ) : (
+                    <Err msg={err} />
+                  )}
+
+                  <Loc {...loc} />
+                </View>
+              </ScrollView>
+            );
+          }
           const ProfileView = ({ sess, back, onCheckUpdate, checkingUpdate }) => {
             const { C, s, themeMode, changeTheme } = useT();
             const name = sess?.name || 'Pengguna';
