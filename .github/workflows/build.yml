@@ -188,15 +188,18 @@ jobs:
               
               if (lat && lng) {
                 try {
-                  const rev = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
+                  const rev = await Promise.race([
+                    Location.reverseGeocodeAsync({ latitude: lat, longitude: lng }),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 4000)),
+                  ]);
                   if (rev && rev.length > 0) {
                     const r = rev[0];
                     address = [r.name, r.street, r.city, r.subregion].filter(Boolean).join(', ');
                   } else {
-                    address = 'Lokasi tidak dapat dikenal pasti';
+                    address = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
                   }
                 } catch (err) {
-                  address = 'Gagal memuat turun nama lokasi';
+                  address = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
                 }
               } else {
                 address = 'Koordinat GPS tidak tersedia';
@@ -1141,153 +1144,691 @@ jobs:
           };
           const HistoryView = ({ sess, back }) => {
             const { C, s } = useT();
-            const [tab, setTab] = useState('web');
+            const now = new Date();
+            const [tab, setTab] = useState('record');
+            const [selMonth, setSelMonth] = useState(now.getMonth() + 1);
+            const [selYear, setSelYear] = useState(now.getFullYear());
+            const [showFilter, setShowFilter] = useState(false);
+            const [showStats, setShowStats] = useState(false);
+            const [portalData, setPortalData] = useState(null);
+            const [needPortalLogin, setNeedPortalLogin] = useState(false);
+            const [webLoading, setWebLoading] = useState(true);
             const [tags, setTags] = useState([]);
             const [details, setDetails] = useState([]);
-            const [webLoading, setWebLoading] = useState(true);
-            const [syncCount, setSyncCount] = useState(0);
+            const [dayModal, setDayModal] = useState(null);
+            const [actionMode, setActionMode] = useState(null);
+            const [reasonType, setReasonType] = useState('2');
+            const [reasonSubType, setReasonSubType] = useState('1');
+            const [reasonText, setReasonText] = useState('');
+            const [bdrText, setBdrText] = useState('');
+            const [submitting, setSubmitting] = useState(false);
+            const [submitMsg, setSubmitMsg] = useState('');
+            const [submitErr, setSubmitErr] = useState('');
             const webViewRef = useRef(null);
+
+            const monthNames = [
+              'Januari', 'Februari', 'Mac', 'April', 'Mei', 'Jun',
+              'Julai', 'Ogos', 'September', 'Oktober', 'November', 'Disember'
+            ];
+            const yearOptions = [2024, 2025, 2026, 2027, 2028];
+            const cacheKey = `PORTAL_RECORD_${selYear}_${selMonth}`;
+            const portalUrl = `${PORTAL}?month=${selMonth}&year=${selYear}`;
+
             const loadLocalData = useCallback(async () => {
               setTags(await getLocalTags());
               const d = new Date();
               const detailKey = `TAG_DETAILS_${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-              const dt = await SecureStore.getItemAsync(detailKey);
+              const dt = await SecureStore.getItemAsync(detailKey).catch(() => null);
               if (dt) setDetails(JSON.parse(dt));
-              const syn = await SecureStore.getItemAsync('SYNCED_SERVER_ATTENDANCE');
-              if (syn) {
-                const p = JSON.parse(syn);
-                if (Array.isArray(p)) setSyncCount(p.length);
-              }
             }, []);
+
             useEffect(() => {
+              let on = true;
               loadLocalData();
-            }, [loadLocalData]);
+              (async () => {
+                const cached = await SecureStore.getItemAsync(cacheKey).catch(() => null);
+                if (cached && on) {
+                  try { setPortalData(JSON.parse(cached)); } catch (_) {}
+                } else if (on) {
+                  setPortalData(null);
+                }
+              })();
+              return () => { on = false; };
+            }, [cacheKey, loadLocalData]);
+
             const sortedTags = [...tags].sort((a, b) => a.t - b.t);
             const todayFirst = sortedTags.length ? fromMs(sortedTags[0].t) : null;
             const todayLast = sortedTags.length > 1 ? fromMs(sortedTags[sortedTags.length - 1].t) : todayFirst;
+
             const onWebMessage = async (event) => {
               try {
                 const msg = JSON.parse(event.nativeEvent.data);
-                if (msg.type === 'ATTENDANCE_TABLE' && Array.isArray(msg.data) && msg.data.length > 0) {
-                  let merged = msg.data;
-                  try {
-                    const old = await SecureStore.getItemAsync('SYNCED_SERVER_ATTENDANCE');
-                    const oldArr = old ? JSON.parse(old) : [];
-                    merged = mergeAttendance(Array.isArray(oldArr) ? oldArr : [], msg.data);
-                  } catch (_) {}
-                  await SecureStore.setItemAsync('SYNCED_SERVER_ATTENDANCE', JSON.stringify(merged));
-                  setSyncCount(merged.length);
+                if (msg.type === 'LOGIN_REQUIRED') {
+                  setNeedPortalLogin(true);
+                  return;
+                }
+                if (msg.type === 'ATTENDANCE_FULL' && msg.payload) {
+                  setNeedPortalLogin(false);
+                  setPortalData(msg.payload);
+                  await SecureStore.setItemAsync(cacheKey, JSON.stringify(msg.payload)).catch(() => {});
+                  if (Array.isArray(msg.payload.rows) && msg.payload.rows.length > 0) {
+                    try {
+                      const old = await SecureStore.getItemAsync('SYNCED_SERVER_ATTENDANCE');
+                      const oldArr = old ? JSON.parse(old) : [];
+                      const merged = mergeAttendance(Array.isArray(oldArr) ? oldArr : [], msg.payload.rows);
+                      await SecureStore.setItemAsync('SYNCED_SERVER_ATTENDANCE', JSON.stringify(merged));
+                    } catch (_) {}
+                  }
                 }
               } catch (_) {}
             };
+
             const scraperScript = `
               (function() {
                 function scrape() {
                   try {
-                    var rows = document.querySelectorAll('table tr');
+                    var href = String(window.location.href || '');
+                    if (/\\/login/i.test(href) || document.querySelector('input[name="password"]')) {
+                      if (window.ReactNativeWebView) {
+                        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'LOGIN_REQUIRED' }));
+                      }
+                      return;
+                    }
+                    var mainTable = document.querySelector('section.content table.table-bordered');
+                    if (!mainTable) return;
+
+                    var staffName = '', workProfile = '', cardColor = '';
+                    var inputs = document.querySelectorAll('section.content .card-body input.form-control');
+                    if (inputs.length >= 1) staffName = (inputs[0].value || '').replace(/\\s+/g, ' ').trim();
+                    if (inputs.length >= 2) workProfile = (inputs[1].value || '').trim();
+                    if (inputs.length >= 3) {
+                      var cls = inputs[2].className || '';
+                      if (/bg-yellow/i.test(cls)) cardColor = 'yellow';
+                      else if (/bg-red|bg-danger/i.test(cls)) cardColor = 'red';
+                      else if (/bg-green|bg-success/i.test(cls)) cardColor = 'green';
+                      else if (/bg-orange/i.test(cls)) cardColor = 'orange';
+                      else if (/bg-blue|bg-info/i.test(cls)) cardColor = 'blue';
+                    }
+
+                    var stats = [];
+                    var statItems = document.querySelectorAll('section.content fieldset ul.nav li.nav-link');
+                    for (var s = 0; s < statItems.length; s++) {
+                      var spans = statItems[s].querySelectorAll('span');
+                      if (spans.length >= 2) {
+                        stats.push({
+                          label: spans[0].innerText.trim(),
+                          value: spans[1].innerText.trim(),
+                          cls: spans[1].className || ''
+                        });
+                      }
+                    }
+
+                    var pdfUrl = '';
+                    var pdfForm = document.querySelector('form[action*="pdf_attendance_monthly"]');
+                    if (pdfForm) {
+                      var act = pdfForm.getAttribute('action') || '';
+                      var q = [];
+                      pdfForm.querySelectorAll('input[name]').forEach(function(inp) {
+                        q.push(encodeURIComponent(inp.name) + '=' + encodeURIComponent(inp.value || ''));
+                      });
+                      pdfUrl = act + (q.length ? '?' + q.join('&') : '');
+                    }
+
+                    var csrf = '';
+                    var metaCsrf = document.querySelector('meta[name="csrf-token"]');
+                    if (metaCsrf) csrf = metaCsrf.getAttribute('content') || '';
+                    var recordAction = '';
+                    var putForm = document.querySelector('form[action*="attendance_record/"]');
+                    if (putForm) recordAction = putForm.getAttribute('action') || '';
+
+                    var detectColor = function(el) {
+                      if (!el) return '';
+                      var c = (el.className || '') + ' ' + (el.getAttribute('style') || '');
+                      if (/bg-red|bg-danger|#dc3545|red/i.test(c)) return 'red';
+                      if (/bg-yellow|bg-warning|#ffc107|yellow/i.test(c)) return 'yellow';
+                      if (/bg-green|bg-success|#28a745|green/i.test(c)) return 'green';
+                      if (/bg-orange|#fd7e14|orange/i.test(c)) return 'orange';
+                      if (/bg-blue|bg-info|#17a2b8|lightblue|blue/i.test(c)) return 'blue';
+                      if (/bg-secondary/i.test(c)) return 'weekend';
+                      return '';
+                    };
+
+                    var detectMethod = function(el) {
+                      if (!el) return '';
+                      if (el.querySelector('.fa-qrcode')) return 'qr';
+                      if (el.querySelector('.fa-map-marked, .fa-map-marker')) return 'geo';
+                      if (el.querySelector('.fa-user-check, .fa-camera')) return 'fr';
+                      return '';
+                    };
+
+                    var tbodyRows = mainTable.querySelectorAll(':scope > tbody > tr');
                     var results = [];
-                    for (var i = 0; i < rows.length; i++) {
-                      var cells = rows[i].querySelectorAll('td');
-                      if (cells.length >= 4) {
+                    for (var i = 0; i < tbodyRows.length; i++) {
+                      var tr = tbodyRows[i];
+                      var cells = tr.querySelectorAll(':scope > td');
+                      if (cells.length >= 6) {
                         var dateText = cells[0].innerText.trim();
-                        var dayText = cells[1].innerText.trim();
-                        var inText = cells[2].innerText.trim();
-                        var outText = cells[3].innerText.trim();
-                        var diffText = cells.length > 4 ? cells[4].innerText.trim() : '';
-                        var notesText = cells.length > 5 ? cells[5].innerText.trim() : '';
-                        
                         if (/\\d+[-/\\.]\\d+[-/\\.]\\d+/.test(dateText)) {
+                          var dayNum = parseInt(dateText.split(/[-/\\.]/)[0], 10);
+                          var dayText = cells[1].innerText.trim();
+                          var inText = cells[2].innerText.trim();
+                          var outText = cells[3].innerText.trim();
+                          var diffText = cells[4].innerText.trim();
+                          var totalTitle = (cells[4].getAttribute('title') || '').trim();
+                          var notesText = cells[5].innerText.trim();
                           var inMatch = /(\\d{1,2}:\\d{2}\\s*(?:AM|PM)?)/i.exec(inText);
                           var outMatch = /(\\d{1,2}:\\d{2}\\s*(?:AM|PM)?)/i.exec(outText);
+
+                          var txList = [];
+                          var logModal = document.getElementById('view-attendance-log' + dayNum);
+                          if (logModal) {
+                            var txRows = logModal.querySelectorAll('tbody tr');
+                            for (var j = 0; j < txRows.length; j++) {
+                              var tCells = txRows[j].querySelectorAll('td');
+                              if (tCells.length >= 4) {
+                                txList.push({
+                                  time: tCells[0].innerText.trim(),
+                                  method: detectMethod(tCells[1]) || 'other',
+                                  location: tCells[2].innerText.replace(/\\s+/g, ' ').trim(),
+                                  coord: tCells[3].innerText.replace(/\\s+/g, ' ').trim()
+                                });
+                              }
+                            }
+                          }
+
+                          var rowColor = detectColor(cells[2]) || detectColor(cells[3]) || detectColor(cells[5]) || detectColor(tr);
                           results.push({
+                            dayNum: dayNum,
                             date: dateText,
                             day: dayText,
                             clockIn: inMatch ? inMatch[1] : '',
+                            inMethod: detectMethod(cells[2]),
                             clockOut: outMatch ? outMatch[1] : '',
+                            outMethod: detectMethod(cells[3]),
                             diff: diffText,
-                            notes: notesText
+                            totalHours: totalTitle,
+                            notes: notesText,
+                            color: rowColor,
+                            transactions: txList
                           });
                         }
                       }
                     }
+
                     if (results.length > 0 && window.ReactNativeWebView) {
-                      var js = JSON.stringify(results);
-                      if (js !== window.__ihrLast) {
-                        window.__ihrLast = js;
-                        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'ATTENDANCE_TABLE', data: results }));
+                      var payload = {
+                        staffName: staffName,
+                        workProfile: workProfile,
+                        cardColor: cardColor,
+                        stats: stats,
+                        pdfUrl: pdfUrl,
+                        csrf: csrf,
+                        recordAction: recordAction,
+                        rows: results
+                      };
+                      var js = JSON.stringify(payload);
+                      if (js !== window.__ihrFullLast) {
+                        window.__ihrFullLast = js;
+                        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'ATTENDANCE_FULL', payload: payload }));
                       }
                     }
                   } catch (e) {}
                 }
                 scrape();
-                setTimeout(scrape, 1500);
-                setTimeout(scrape, 3500);
-                if (!window.__ihrTimer) { window.__ihrTimer = setInterval(scrape, 2500); }
+                setTimeout(scrape, 1200);
+                setTimeout(scrape, 3000);
+                if (!window.__ihrFullTimer) { window.__ihrFullTimer = setInterval(scrape, 2500); }
               })();
               true;
             `;
+
+            const badgeTheme = (color) => {
+              if (color === 'red') return { bg: '#FBE9E7', border: '#F2C6C1', text: '#B3261E', label: 'Lewat / Awal' };
+              if (color === 'yellow') return { bg: '#FEF3C7', border: '#FDE68A', text: '#B45309', label: 'Menunggu' };
+              if (color === 'green') return { bg: '#E8F5E9', border: '#A7F3D0', text: '#2E7D4F', label: 'Disahkan' };
+              if (color === 'orange') return { bg: '#FFEDD5', border: '#FED7AA', text: '#C2410C', label: 'Diterima' };
+              if (color === 'blue') return { bg: '#E0F2FE', border: '#BAE6FD', text: '#0369A1', label: 'Tiada Profil' };
+              if (color === 'weekend') return { bg: C.field, border: C.line, text: C.mute, label: 'Hujung Minggu' };
+              return null;
+            };
+
+            const cardColorLabel = (c) => {
+              if (c === 'yellow') return { name: 'Kuning', bg: '#FACC15', fg: '#14141A' };
+              if (c === 'red') return { name: 'Merah', bg: '#DC2626', fg: '#FFFFFF' };
+              if (c === 'green') return { name: 'Hijau', bg: '#16A34A', fg: '#FFFFFF' };
+              if (c === 'orange') return { name: 'Oren', bg: '#EA580C', fg: '#FFFFFF' };
+              if (c === 'blue') return { name: 'Biru', bg: '#0284C7', fg: '#FFFFFF' };
+              return { name: c || 'Normal', bg: C.field, fg: C.ink };
+            };
+
+            const openDayModal = (row) => {
+              setDayModal(row);
+              setActionMode(null);
+              setReasonText('');
+              setBdrText('');
+              setSubmitMsg('');
+              setSubmitErr('');
+            };
+
+            const submitPortalForm = async () => {
+              if (!dayModal) return;
+              setSubmitting(true);
+              setSubmitMsg('');
+              setSubmitErr('');
+              try {
+                if (actionMode === 'clock_in' || actionMode === 'clock_out') {
+                  if (!reasonText.trim()) throw new Error('Sila masukkan alasan terlebih dahulu.');
+                  let apiOk = false;
+                  try {
+                    await call(EP.reason, {
+                      staff_id: sess?.staff_id,
+                      date: dayModal.date,
+                      type: actionMode === 'clock_in' ? 'in' : 'out',
+                      reason_type: reasonType,
+                      reason_subtype: reasonSubType,
+                      reason: reasonText.trim(),
+                    });
+                    apiOk = true;
+                  } catch (_) {}
+
+                  if (portalData?.recordAction && portalData?.csrf) {
+                    const formBody = [
+                      `_method=PUT`,
+                      `_token=${encodeURIComponent(portalData.csrf)}`,
+                      `d=${encodeURIComponent(dayModal.dayNum)}`,
+                      `m=${encodeURIComponent(selMonth)}`,
+                      `y=${encodeURIComponent(selYear)}`,
+                      `reason_type=${encodeURIComponent(reasonType)}`,
+                      `reason_subtype=${encodeURIComponent(reasonSubType)}`,
+                      `reason=${encodeURIComponent(reasonText.trim())}`,
+                      `submit=${actionMode === 'clock_in' ? 'edit_attendance_clock_in' : 'edit_attendance_clock_out'}`
+                    ].join('&');
+                    const res = await fetch(portalData.recordAction, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                      body: formBody,
+                    });
+                    if (!res.ok && !apiOk) throw new Error(`Gagal menghantar alasan (HTTP ${res.status}). Sila log masuk di tab Portal Web.`);
+                  } else if (!apiOk) {
+                    throw new Error('Sila buka tab Portal Web dan log masuk sekali untuk mengaktifkan penghantaran.');
+                  }
+                  setSubmitMsg('Alasan berjaya dihantar untuk pengesahan penyelia.');
+                  setActionMode(null);
+                  webViewRef.current?.reload();
+                } else if (actionMode === 'bdr') {
+                  if (!bdrText.trim()) throw new Error('Sila isi laporan kerja BDR.');
+                  if (!portalData?.recordAction || !portalData?.csrf) {
+                    throw new Error('Sila buka tab Portal Web dan log masuk sekali untuk menghantar laporan BDR.');
+                  }
+                  const formBody = [
+                    `_method=PUT`,
+                    `_token=${encodeURIComponent(portalData.csrf)}`,
+                    `d=${encodeURIComponent(dayModal.dayNum)}`,
+                    `m=${encodeURIComponent(selMonth)}`,
+                    `y=${encodeURIComponent(selYear)}`,
+                    `description=${encodeURIComponent(bdrText.trim())}`,
+                    `submit=edit_attendance_remark_bdr`
+                  ].join('&');
+                  const res = await fetch(portalData.recordAction, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: formBody,
+                  });
+                  if (!res.ok) throw new Error(`Gagal menghantar laporan BDR (HTTP ${res.status}).`);
+                  setSubmitMsg('Laporan kerja BDR berjaya dikemaskini.');
+                  setActionMode(null);
+                  webViewRef.current?.reload();
+                }
+              } catch (e) {
+                setSubmitErr(e.message);
+              } finally {
+                setSubmitting(false);
+              }
+            };
+
+            const renderMethodBadge = (m) => {
+              if (!m) return null;
+              const isQr = m === 'qr';
+              const isGeo = m === 'geo';
+              return (
+                <View style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  backgroundColor: C.primarySoft || '#F8E5E1',
+                  paddingHorizontal: 6,
+                  paddingVertical: 2,
+                  borderRadius: 6,
+                  marginLeft: 5,
+                  gap: 3,
+                }}>
+                  <MaterialIcons name={isQr ? 'qr-code-2' : isGeo ? 'location-on' : 'verified-user'} size={12} color={C.primary} />
+                  <Text style={{ fontSize: 10, fontWeight: '800', color: C.primary }}>
+                    {isQr ? 'QR' : isGeo ? 'GEO' : 'FR'}
+                  </Text>
+                </View>
+              );
+            };
+
+            const cc = cardColorLabel(portalData?.cardColor);
+            const rowsList = portalData?.rows || [];
+
             return (
               <View style={{ flex: 1, backgroundColor: C.bg }}>
-                <Top title="Rekod Kehadiran" onBack={back} />
-                
-                <View style={{ flexDirection: 'row', padding: 12, backgroundColor: C.card, borderBottomWidth: 1, borderBottomColor: C.line, gap: 8 }}>
-                  <Pressable
-                    onPress={() => setTab('web')}
-                    style={{
-                      flex: 1,
-                      paddingVertical: 10,
-                      borderRadius: 14,
-                      backgroundColor: tab === 'web' ? C.primary : C.field,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      borderWidth: 1,
-                      borderColor: tab === 'web' ? C.primary : C.line,
-                    }}
-                  >
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <MaterialIcons name="cloud-sync" size={18} color={tab === 'web' ? C.onPrimary : C.ink} />
-                      <Text style={{ fontSize: 13, fontWeight: '700', color: tab === 'web' ? C.onPrimary : C.ink }}>
-                        Portal iHR
-                      </Text>
-                    </View>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => { setTab('local'); loadLocalData(); }}
-                    style={{
-                      flex: 1,
-                      paddingVertical: 10,
-                      borderRadius: 14,
-                      backgroundColor: tab === 'local' ? C.primary : C.field,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      borderWidth: 1,
-                      borderColor: tab === 'local' ? C.primary : C.line,
-                    }}
-                  >
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <MaterialIcons name="devices" size={18} color={tab === 'local' ? C.onPrimary : C.ink} />
-                      <Text style={{ fontSize: 13, fontWeight: '700', color: tab === 'local' ? C.onPrimary : C.ink }}>
-                        Log Peranti
-                      </Text>
-                    </View>
-                  </Pressable>
+                <Top title="Log Kehadiran" onBack={back} />
+
+                <View style={{ flexDirection: 'row', padding: 10, backgroundColor: C.card, borderBottomWidth: 1, borderBottomColor: C.line, gap: 6 }}>
+                  {[
+                    { id: 'record', label: 'Rekod Bulanan', icon: 'event-note' },
+                    { id: 'web', label: 'Portal Web', icon: 'language' },
+                    { id: 'local', label: 'Log Peranti', icon: 'devices' },
+                  ].map((t) => {
+                    const active = tab === t.id;
+                    return (
+                      <Pressable
+                        key={t.id}
+                        onPress={() => { setTab(t.id); if (t.id === 'local') loadLocalData(); }}
+                        style={{
+                          flex: 1,
+                          paddingVertical: 9,
+                          borderRadius: 12,
+                          backgroundColor: active ? C.primary : C.field,
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          borderWidth: 1,
+                          borderColor: active ? C.primary : C.line,
+                        }}
+                      >
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                          <MaterialIcons name={t.icon} size={16} color={active ? C.onPrimary : C.ink} />
+                          <Text style={{ fontSize: 12, fontWeight: '700', color: active ? C.onPrimary : C.ink }}>
+                            {t.label}
+                          </Text>
+                        </View>
+                      </Pressable>
+                    );
+                  })}
                 </View>
-                {tab === 'web' ? (
+
+                {tab !== 'web' ? (
+                  <View style={{ height: 0, width: 0, overflow: 'hidden' }} pointerEvents="none">
+                    <WebView
+                      ref={webViewRef}
+                      source={{ uri: portalUrl }}
+                      injectedJavaScript={scraperScript}
+                      onMessage={onWebMessage}
+                      onLoadStart={() => setWebLoading(true)}
+                      onLoadEnd={() => {
+                        setWebLoading(false);
+                        webViewRef.current?.injectJavaScript(scraperScript);
+                      }}
+                      javaScriptEnabled={true}
+                      domStorageEnabled={true}
+                      sharedCookiesEnabled={true}
+                      thirdPartyCookiesEnabled={true}
+                    />
+                  </View>
+                ) : null}
+
+                {tab === 'record' ? (
+                  <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 14, gap: 12, paddingBottom: 32 }}>
+                    <Card>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                        <Pressable
+                          onPress={() => setShowFilter(!showFilter)}
+                          style={{
+                            flex: 1,
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            backgroundColor: C.field,
+                            paddingHorizontal: 12,
+                            paddingVertical: 10,
+                            borderRadius: 12,
+                            borderWidth: 1,
+                            borderColor: C.line,
+                          }}
+                        >
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                            <MaterialIcons name="date-range" size={18} color={C.primary} />
+                            <Text style={{ fontSize: 14, fontWeight: '800', color: C.ink }}>
+                              {monthNames[selMonth - 1]} {selYear}
+                            </Text>
+                          </View>
+                          <Text style={{ color: C.mute, fontSize: 12 }}>{showFilter ? '▲' : '▼'}</Text>
+                        </Pressable>
+
+                        <Pressable
+                          onPress={() => {
+                            if (portalData?.pdfUrl) Linking.openURL(portalData.pdfUrl);
+                            else Alert.alert('PDF Bulanan', 'Sila tunggu data bulan dimuatkan dahulu sebelum menjana PDF.');
+                          }}
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            backgroundColor: C.field,
+                            paddingHorizontal: 12,
+                            paddingVertical: 10,
+                            borderRadius: 12,
+                            borderWidth: 1,
+                            borderColor: C.line,
+                            gap: 4,
+                          }}
+                        >
+                          <MaterialIcons name="picture-as-pdf" size={18} color={C.primary} />
+                          <Text style={{ fontSize: 12, fontWeight: '800', color: C.primary }}>PDF</Text>
+                        </Pressable>
+
+                        <Pressable
+                          onPress={() => webViewRef.current?.reload()}
+                          style={{
+                            paddingHorizontal: 10,
+                            paddingVertical: 10,
+                            borderRadius: 12,
+                            backgroundColor: C.field,
+                            borderWidth: 1,
+                            borderColor: C.line,
+                          }}
+                        >
+                          {webLoading ? <ActivityIndicator size="small" color={C.primary} /> : <MaterialIcons name="refresh" size={18} color={C.primary} />}
+                        </Pressable>
+                      </View>
+
+                      {showFilter ? (
+                        <View style={{ marginTop: 12, gap: 10, borderTopWidth: 1, borderTopColor: C.line, paddingTop: 12 }}>
+                          <Text style={s.lbl}>Pilih Bulan</Text>
+                          <Select
+                            value={monthNames[selMonth - 1]}
+                            placeholder="Bulan"
+                            options={monthNames}
+                            onPick={(mName) => {
+                              const idx = monthNames.indexOf(mName);
+                              if (idx >= 0) setSelMonth(idx + 1);
+                            }}
+                          />
+                          <Text style={s.lbl}>Pilih Tahun</Text>
+                          <Select
+                            value={String(selYear)}
+                            placeholder="Tahun"
+                            options={yearOptions.map(String)}
+                            onPick={(yStr) => setSelYear(Number(yStr))}
+                          />
+                          <Btn icon="🔍" label="Papar Rekod Bulan Ini" onPress={() => { setShowFilter(false); setWebLoading(true); }} />
+                        </View>
+                      ) : null}
+
+                      {portalData ? (
+                        <View style={{ flexDirection: 'row', gap: 8, marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: C.line }}>
+                          <View style={{ flex: 1, backgroundColor: C.field, padding: 10, borderRadius: 12, borderWidth: 1, borderColor: C.line }}>
+                            <Text style={{ fontSize: 10, fontWeight: '700', color: C.mute, textTransform: 'uppercase' }}>Profil Waktu Bekerja</Text>
+                            <Text style={{ fontSize: 14, fontWeight: '800', color: C.ink, marginTop: 2 }}>{portalData.workProfile || 'WBF'}</Text>
+                          </View>
+                          <View style={{ flex: 1, backgroundColor: C.field, padding: 10, borderRadius: 12, borderWidth: 1, borderColor: C.line }}>
+                            <Text style={{ fontSize: 10, fontWeight: '700', color: C.mute, textTransform: 'uppercase' }}>Warna Kad</Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 6 }}>
+                              <View style={{ width: 14, height: 14, borderRadius: 7, backgroundColor: cc.bg, borderWidth: 1, borderColor: C.line }} />
+                              <Text style={{ fontSize: 14, fontWeight: '800', color: C.ink }}>{cc.name}</Text>
+                            </View>
+                          </View>
+                        </View>
+                      ) : null}
+                    </Card>
+
+                    {needPortalLogin && rowsList.length === 0 ? (
+                      <Card title="Log Masuk Portal Diperlukan" icon="🔐" tint={C.primary}>
+                        <Text style={{ color: C.mute, fontSize: 13, marginBottom: 12 }}>
+                          Sesi portal web tamat tempoh atau belum dilog masuk. Sila log masuk sekali di tab Portal Web untuk menyegerakkan jadual kehadiran dan log transaksi.
+                        </Text>
+                        <Btn icon="🌐" label="Buka Portal Web untuk Log Masuk" onPress={() => setTab('web')} />
+                      </Card>
+                    ) : null}
+
+                    {portalData?.stats?.length > 0 ? (
+                      <Collapse
+                        title="Ringkasan Status & Rekod"
+                        icon="📊"
+                        tint={C.navy}
+                        summary={portalData.stats.slice(-3).map((st) => `${st.label}: ${st.value}`).join(' · ')}
+                        open={showStats}
+                        onToggle={() => setShowStats(!showStats)}
+                      >
+                        <View style={{ gap: 6 }}>
+                          {portalData.stats.map((st, idx) => (
+                            <View key={idx} style={{
+                              flexDirection: 'row',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              paddingVertical: 8,
+                              borderBottomWidth: idx === portalData.stats.length - 1 ? 0 : 1,
+                              borderBottomColor: C.line,
+                            }}>
+                              <Text style={{ fontSize: 13, color: C.ink, flex: 1, paddingRight: 8 }}>{st.label}</Text>
+                              <View style={{ backgroundColor: C.primarySoft || '#F8E5E1', paddingHorizontal: 10, paddingVertical: 3, borderRadius: 10 }}>
+                                <Text style={{ fontSize: 12, fontWeight: '800', color: C.primary }}>{st.value}</Text>
+                              </View>
+                            </View>
+                          ))}
+                        </View>
+                      </Collapse>
+                    ) : null}
+
+                    {rowsList.length === 0 && !needPortalLogin ? (
+                      <Card>
+                        <View style={{ alignItems: 'center', paddingVertical: 20, gap: 10 }}>
+                          {webLoading ? <ActivityIndicator size="large" color={C.primary} /> : null}
+                          <Text style={{ color: C.mute, fontSize: 13, textAlign: 'center' }}>
+                            {webLoading ? `Memuat turun rekod ${monthNames[selMonth - 1]} ${selYear} daripada pelayan…` : 'Tiada rekod dijumpai untuk bulan ini. Tekan Portal Web untuk menyemak.'}
+                          </Text>
+                        </View>
+                      </Card>
+                    ) : (
+                      rowsList.map((r, idx) => {
+                        const bt = badgeTheme(r.color);
+                        const hasIn = !!r.clockIn;
+                        const hasOut = !!r.clockOut;
+                        return (
+                          <Pressable
+                            key={`${r.date}-${idx}`}
+                            onPress={() => openDayModal(r)}
+                            style={({ pressed }) => [{
+                              backgroundColor: C.card,
+                              borderRadius: 18,
+                              padding: 14,
+                              borderWidth: 1,
+                              borderColor: bt ? bt.border : C.line,
+                              borderLeftWidth: bt ? 5 : 1,
+                              borderLeftColor: bt ? bt.text : C.line,
+                            }, pressed && { opacity: 0.75 }]}
+                          >
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                <Text style={{ fontSize: 15, fontWeight: '800', color: C.ink }}>{r.date}</Text>
+                                <Text style={{ fontSize: 12, fontWeight: '600', color: C.mute }}>{r.day}</Text>
+                              </View>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                                {r.diff ? (
+                                  <View style={{ backgroundColor: C.field, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8, borderWidth: 1, borderColor: C.line }}>
+                                    <Text style={{ fontSize: 11, fontWeight: '800', color: r.diff.startsWith('-') ? C.bad : C.ok }}>{r.diff}</Text>
+                                  </View>
+                                ) : null}
+                                {bt && r.color !== 'weekend' ? (
+                                  <View style={{ backgroundColor: bt.bg, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 }}>
+                                    <Text style={{ fontSize: 10, fontWeight: '800', color: bt.text }}>{bt.label}</Text>
+                                  </View>
+                                ) : null}
+                              </View>
+                            </View>
+
+                            {(hasIn || hasOut) ? (
+                              <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
+                                <View style={{ flex: 1, backgroundColor: C.field, padding: 9, borderRadius: 12, borderWidth: 1, borderColor: C.line }}>
+                                  <Text style={{ fontSize: 10, fontWeight: '700', color: C.mute }}>MASUK</Text>
+                                  <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 3 }}>
+                                    <Text style={{ fontSize: 14, fontWeight: '800', color: C.ink }}>{r.clockIn || '—'}</Text>
+                                    {renderMethodBadge(r.inMethod)}
+                                  </View>
+                                </View>
+                                <View style={{ flex: 1, backgroundColor: C.field, padding: 9, borderRadius: 12, borderWidth: 1, borderColor: C.line }}>
+                                  <Text style={{ fontSize: 10, fontWeight: '700', color: C.mute }}>KELUAR</Text>
+                                  <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 3 }}>
+                                    <Text style={{ fontSize: 14, fontWeight: '800', color: C.ink }}>{r.clockOut || '—'}</Text>
+                                    {renderMethodBadge(r.outMethod)}
+                                  </View>
+                                </View>
+                              </View>
+                            ) : null}
+
+                            {r.notes ? (
+                              <View style={{ marginTop: 8, backgroundColor: C.primarySoft || '#F8E5E1', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10 }}>
+                                <Text style={{ fontSize: 12, fontWeight: '700', color: C.primary }}>{r.notes}</Text>
+                              </View>
+                            ) : null}
+
+                            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+                              <Text style={{ fontSize: 11, color: C.mute }}>
+                                {r.transactions?.length ? `${r.transactions.length} log transaksi` : (r.totalHours ? `Jumlah: ${r.totalHours}` : 'Ketik untuk log & tindakan')}
+                              </Text>
+                              <MaterialIcons name="chevron-right" size={18} color={C.mute} />
+                            </View>
+                          </Pressable>
+                        );
+                      })
+                    )}
+
+                    {rowsList.length > 0 ? (
+                      <Card title="Rujukan Warna" icon="ℹ️" tint={C.navy}>
+                        <View style={{ gap: 6 }}>
+                          {[
+                            { color: '#DC2626', text: 'Lewat Masuk / Pulang Awal / Ditolak (Kerja Luar)' },
+                            { color: '#FACC15', text: 'Menunggu Pengesahan (Kerja Luar)' },
+                            { color: '#16A34A', text: 'Rekod Merah Diterima (Rasmi) / Diluluskan' },
+                            { color: '#EA580C', text: 'Rekod Merah Diterima (Lain-lain)' },
+                            { color: '#0284C7', text: 'Tiada Profil Waktu Bekerja' },
+                          ].map((lg, i) => (
+                            <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                              <View style={{ width: 14, height: 14, borderRadius: 4, backgroundColor: lg.color }} />
+                              <Text style={{ fontSize: 12, color: C.mute, flex: 1 }}>{lg.text}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      </Card>
+                    ) : null}
+                  </ScrollView>
+                ) : tab === 'web' ? (
                   <View style={{ flex: 1 }}>
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 8, backgroundColor: C.field, borderBottomWidth: 1, borderBottomColor: C.line }}>
-                      <Text style={{ fontSize: 11, color: syncCount > 0 ? '#2E7D4F' : C.mute, fontWeight: '700' }}>
-                        {syncCount > 0 ? `✓ ${syncCount} rekod dikemaskini` : '🌐 ihr.mtib.gov.my'}
+                      <Text style={{ fontSize: 11, color: rowsList.length > 0 ? '#2E7D4F' : C.mute, fontWeight: '700' }}>
+                        {rowsList.length > 0 ? `✓ ${rowsList.length} hari disegerakkan (${monthNames[selMonth - 1]} ${selYear})` : '🌐 ihr.mtib.gov.my'}
                       </Text>
                       <View style={{ flexDirection: 'row', gap: 8 }}>
-                        <Pressable 
-                          onPress={() => webViewRef.current?.reload()} 
+                        <Pressable
+                          onPress={() => webViewRef.current?.reload()}
                           style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10, backgroundColor: C.card, borderWidth: 1, borderColor: C.line }}
                         >
                           <MaterialIcons name="refresh" size={14} color={C.primary} />
                           <Text style={{ fontSize: 11, fontWeight: '700', color: C.primary, marginLeft: 4 }}>Reload</Text>
                         </Pressable>
-                        <Pressable 
-                          onPress={() => Linking.openURL(PORTAL)} 
+                        <Pressable
+                          onPress={() => Linking.openURL(portalUrl)}
                           style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10, backgroundColor: C.card, borderWidth: 1, borderColor: C.line }}
                         >
                           <MaterialIcons name="open-in-browser" size={14} color={C.primary} />
@@ -1297,7 +1838,7 @@ jobs:
                     </View>
                     <WebView
                       ref={webViewRef}
-                      source={{ uri: PORTAL }}
+                      source={{ uri: portalUrl }}
                       style={{ flex: 1 }}
                       injectedJavaScript={scraperScript}
                       onMessage={onWebMessage}
@@ -1337,7 +1878,7 @@ jobs:
                             <View key={index} style={{ paddingVertical: 10, borderBottomWidth: index === details.length - 1 ? 0 : 1, borderBottomColor: C.line }}>
                               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                                  <MaterialIcons name={isQr ? "qr-code-2" : "location-on"} size={20} color={C.primary} />
+                                  <MaterialIcons name={isQr ? 'qr-code-2' : 'location-on'} size={20} color={C.primary} />
                                   <Text style={{ fontSize: 14, fontWeight: '700', color: C.ink }}>
                                     {isQr ? 'Imbasan Kod QR' : 'Geotagging Foto'}
                                   </Text>
@@ -1354,10 +1895,160 @@ jobs:
                     </Card>
                   </ScrollView>
                 )}
+
+                <Modal visible={!!dayModal} transparent animationType="slide" onRequestClose={() => setDayModal(null)}>
+                  <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.68)', justifyContent: 'flex-end' }}>
+                    <View style={{
+                      backgroundColor: C.card,
+                      borderTopLeftRadius: 28,
+                      borderTopRightRadius: 28,
+                      padding: 20,
+                      maxHeight: '90%',
+                      borderWidth: 1,
+                      borderColor: C.line,
+                    }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: C.line }}>
+                        <View>
+                          <Text style={{ fontSize: 19, fontWeight: '800', color: C.ink }}>
+                            {dayModal?.date} ({dayModal?.day})
+                          </Text>
+                          <Text style={{ fontSize: 12, color: C.mute, marginTop: 2 }}>
+                            {dayModal?.totalHours ? `Jumlah Bekerja: ${dayModal.totalHours} (${dayModal.diff})` : (dayModal?.notes || 'Transaksi & Tindakan Kehadiran')}
+                          </Text>
+                        </View>
+                        <Pressable onPress={() => setDayModal(null)} style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: C.field, alignItems: 'center', justifyContent: 'center' }}>
+                          <Text style={{ fontSize: 16, color: C.mute, fontWeight: '800' }}>✕</Text>
+                        </Pressable>
+                      </View>
+
+                      <ScrollView style={{ marginVertical: 12 }} showsVerticalScrollIndicator={false}>
+                        <Text style={{ fontSize: 13, fontWeight: '800', color: C.ink, marginBottom: 8 }}>
+                          📋 Transaksi Kehadiran ({dayModal?.transactions?.length || 0})
+                        </Text>
+                        {dayModal?.transactions?.length > 0 ? (
+                          <View style={{ gap: 8, marginBottom: 16 }}>
+                            {dayModal.transactions.map((tx, i) => (
+                              <View key={i} style={{ backgroundColor: C.field, padding: 12, borderRadius: 14, borderWidth: 1, borderColor: C.line }}>
+                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                    <Text style={{ fontSize: 14, fontWeight: '800', color: C.ink }}>{tx.time}</Text>
+                                    {renderMethodBadge(tx.method)}
+                                  </View>
+                                  <Text style={{ fontSize: 11, fontWeight: '700', color: C.primary }}>#{i + 1}</Text>
+                                </View>
+                                <Text style={{ fontSize: 13, fontWeight: '600', color: C.ink, marginTop: 4 }}>
+                                  🏢 {tx.location || '-'}
+                                </Text>
+                                {tx.coord ? (
+                                  <Text style={{ fontSize: 11, color: C.mute, marginTop: 2 }}>
+                                    📍 Koordinat: {tx.coord}
+                                  </Text>
+                                ) : null}
+                              </View>
+                            ))}
+                          </View>
+                        ) : (
+                          <View style={{ backgroundColor: C.field, padding: 12, borderRadius: 14, borderWidth: 1, borderColor: C.line, marginBottom: 16 }}>
+                            <Text style={{ fontSize: 12, color: C.mute }}>
+                              Tiada rekod imbasan terperinci untuk tarikh ini.
+                            </Text>
+                          </View>
+                        )}
+
+                        <Text style={{ fontSize: 13, fontWeight: '800', color: C.ink, marginBottom: 8 }}>
+                          ✍️ Kemaskini Alasan / Laporan
+                        </Text>
+                        <View style={{ flexDirection: 'row', gap: 6, marginBottom: 12 }}>
+                          {[
+                            { id: 'clock_in', label: 'Alasan Lewat' },
+                            { id: 'clock_out', label: 'Pulang Awal' },
+                            { id: 'bdr', label: 'Laporan BDR' },
+                          ].map((act) => {
+                            const active = actionMode === act.id;
+                            return (
+                              <Pressable
+                                key={act.id}
+                                onPress={() => { setActionMode(active ? null : act.id); setSubmitErr(''); setSubmitMsg(''); }}
+                                style={{
+                                  flex: 1,
+                                  paddingVertical: 9,
+                                  borderRadius: 12,
+                                  backgroundColor: active ? C.primary : C.field,
+                                  borderWidth: 1,
+                                  borderColor: active ? C.primary : C.line,
+                                  alignItems: 'center',
+                                }}
+                              >
+                                <Text style={{ fontSize: 11, fontWeight: '800', color: active ? C.onPrimary : C.ink }}>
+                                  {act.label}
+                                </Text>
+                              </Pressable>
+                            );
+                          })}
+                        </View>
+
+                        {(actionMode === 'clock_in' || actionMode === 'clock_out') ? (
+                          <View style={{ backgroundColor: C.field, padding: 14, borderRadius: 16, borderWidth: 1, borderColor: C.line, gap: 10, marginBottom: 12 }}>
+                            <Text style={{ fontSize: 14, fontWeight: '800', color: C.ink }}>
+                              {actionMode === 'clock_in' ? 'Alasan Lewat Masuk' : 'Alasan Pulang Awal'}
+                            </Text>
+                            <Text style={s.lbl}>Jenis Alasan *</Text>
+                            <Select
+                              value={reasonType === '2' ? 'Kelulusan / Urusan Rasmi' : 'Lain - Lain'}
+                              placeholder="Pilih Jenis Alasan"
+                              options={['Kelulusan / Urusan Rasmi', 'Lain - Lain']}
+                              onPick={(lbl) => setReasonType(lbl.startsWith('Kelulusan') ? '2' : '1')}
+                            />
+                            <Text style={s.lbl}>Sub Jenis Alasan *</Text>
+                            <Select
+                              value={reasonSubType === '1' ? 'Bengkel / Latihan / Seminar' : reasonSubType === '2' ? 'Mesyuarat / Tugas Luar' : 'Pelepasan / Kelulusan Keluar Pejabat'}
+                              placeholder="Pilih Sub Jenis"
+                              options={['Bengkel / Latihan / Seminar', 'Mesyuarat / Tugas Luar', 'Pelepasan / Kelulusan Keluar Pejabat']}
+                              onPick={(lbl) => setReasonSubType(lbl.startsWith('Bengkel') ? '1' : lbl.startsWith('Mesyuarat') ? '2' : '3')}
+                            />
+                            <Text style={s.lbl}>Nyatakan Alasan *</Text>
+                            <TextInput
+                              style={[s.in, { minHeight: 72, textAlignVertical: 'top' }]}
+                              value={reasonText}
+                              onChangeText={setReasonText}
+                              placeholder="Tulis alasan anda di sini..."
+                              placeholderTextColor={C.mute}
+                              multiline
+                            />
+                            <Btn icon="📤" label="Hantar Alasan" onPress={submitPortalForm} busy={submitting} />
+                          </View>
+                        ) : null}
+
+                        {actionMode === 'bdr' ? (
+                          <View style={{ backgroundColor: C.field, padding: 14, borderRadius: 16, borderWidth: 1, borderColor: C.line, gap: 10, marginBottom: 12 }}>
+                            <Text style={{ fontSize: 14, fontWeight: '800', color: C.ink }}>
+                              Laporan Kerja (BDR)
+                            </Text>
+                            <Text style={s.lbl}>Butiran Tugasan Harian *</Text>
+                            <TextInput
+                              style={[s.in, { minHeight: 100, textAlignVertical: 'top' }]}
+                              value={bdrText}
+                              onChangeText={setBdrText}
+                              placeholder="Nyatakan tugasan yang dilaksanakan..."
+                              placeholderTextColor={C.mute}
+                              multiline
+                            />
+                            <Btn icon="📤" label="Hantar Laporan BDR" onPress={submitPortalForm} busy={submitting} />
+                          </View>
+                        ) : null}
+
+                        <Err msg={submitErr} />
+                        <Ok msg={submitMsg} />
+                      </ScrollView>
+
+                      <Btn kind="ghost" label="Tutup" onPress={() => setDayModal(null)} />
+                    </View>
+                  </View>
+                </Modal>
               </View>
             );
           };
-          function QrGeneratorView({ sess, back }) {
+                    function QrGeneratorView({ sess, back }) {
             const { C, s } = useT();
             const loc = useFix();
             const [locations, setLocations] = useState(PRESET_TABLET_LOCATIONS);
@@ -2295,10 +2986,11 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: |
+            ~/.npm
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('app/package.json') }}
-          restore-keys: gradle-${{ runner.os }}-
+          key: gradle-npm-${{ runner.os }}-${{ hashFiles('app/package.json') }}
+          restore-keys: gradle-npm-${{ runner.os }}-
       - name: Build APK (retries on network errors)
         run: |
           chmod +x gradlew
