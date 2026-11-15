@@ -68,7 +68,7 @@ jobs:
               "userInterfaceStyle": "automatic",
               "icon": "./assets/icon.png",
               "android": {
-                "package": "my.gov.mtib.ihr.v2",
+                "package": "my.gov.mtib.ihr",
                 "versionCode": 9,
                 "adaptiveIcon": { "foregroundImage": "./assets/adaptive-icon.png", "backgroundColor": "#FFFFFF" },
                 "permissions": [
