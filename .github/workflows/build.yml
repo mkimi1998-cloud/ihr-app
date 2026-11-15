@@ -123,6 +123,22 @@ jobs:
           const GITHUB_REPO = 'mkimi1998-cloud/ihr-app';
           const QR_GEN_ENDPOINT = 'generate_code';
           const MANUAL_LOC_LABEL = '✏️ Masukkan IMEI secara manual';
+          const PRESET_TABLET_LOCATIONS = [
+            { label: 'Menara PGRM 1 - Tingkat 14', imei: '44f5bc3af8244d27a4233faa1821fff5' },
+            { label: 'Menara PGRM 1 - Tingkat 15', imei: '67ba6c25a80b4edbb9888c31d467a625' },
+            { label: 'Menara PGRM 1 - Tingkat 16', imei: '772df402efe84b8293e95509af4b31e5' },
+            { label: 'Menara PGRM 2 - Tingkat 9', imei: 'e1974353a35a4e08b5658e206cdce442' },
+            { label: 'Menara PGRM 2 - Tingkat 10', imei: '8fc4c9ed29f4412d85beaaa81dfe9ad9' },
+            { label: 'Menara PGRM 2 - Tingkat 12', imei: '05749877bde249b4901890bf179d7d65' },
+            { label: 'Pejabat MTIB Wilayah Tengah', imei: '1c25283c7d3146a49b500058a620b9d0' },
+            { label: 'WISDEC 1', imei: '1d79da6cb6a344dba41ad46e5af99416' },
+            { label: 'WISDEC 2', imei: '9fe47379d5ec4adabb7e4630fee26638' },
+            { label: 'FIDEC 1', imei: '4cb985f553124ceeabed1fea44bc6fdb' },
+            { label: 'FIDEC 3', imei: '99ac221842804e2ab28fc0a1fab56952' },
+            { label: 'Pejabat MTIB Wilayah Timur (Kelantan)', imei: 'a58513c07d9b490fa8c06b352bc6b341' },
+            { label: 'Pejabat MTIB Wilayah Utara (Pulau Pinang)', imei: 'e171d2ad794f48138618564ae7c27c28' },
+            { label: 'Testing', imei: 'a200f0387bd94a1487d8e627301db185' },
+          ];
           const pad = (n) => String(n).padStart(2, '0');
           const t12 = (h, m) => `${pad(h % 12 || 12)}:${pad(m)} ${h < 12 ? 'AM' : 'PM'}`;
           const fromServer = (v) => { const m = /(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})/.exec(String(v || '')); return m ? t12(+m[2], +m[3]) : null; };
@@ -1344,10 +1360,10 @@ jobs:
           function QrGeneratorView({ sess, back }) {
             const { C, s } = useT();
             const loc = useFix();
-            const [locations, setLocations] = useState([]);
+            const [locations, setLocations] = useState(PRESET_TABLET_LOCATIONS);
             const [loadingLocs, setLoadingLocs] = useState(true);
-            const [pickedLabel, setPickedLabel] = useState('');
-            const [imeiInput, setImeiInput] = useState('772df402efe84b8293e95509af4b31e5');
+            const [pickedLabel, setPickedLabel] = useState(PRESET_TABLET_LOCATIONS[0].label);
+            const [imeiInput, setImeiInput] = useState(PRESET_TABLET_LOCATIONS[0].imei);
             const [encryptedToken, setEncryptedToken] = useState('');
             const [generatedAt, setGeneratedAt] = useState('');
             const [fetchingQr, setFetchingQr] = useState(false);
@@ -1367,16 +1383,25 @@ jobs:
                   const res = await call(EP.tabletRef, {});
                   if (!active) return;
                   const parsed = parseTabletLocations(res);
-                  setLocations(parsed);
-                  if (parsed.length > 0) {
-                    const matched = parsed.find((x) => x.imei === savedImei || x.label === savedLoc) || parsed[0];
-                    setPickedLabel(matched.label);
-                    setImeiInput(matched.imei);
-                  } else if (!savedLoc) {
-                    setPickedLabel(MANUAL_LOC_LABEL);
+                  const mergedMap = new Map();
+                  PRESET_TABLET_LOCATIONS.forEach((x) => {
+                    if (x.imei) mergedMap.set(x.imei.toLowerCase(), x);
+                  });
+                  parsed.forEach((x) => {
+                    if (x.imei && x.label) mergedMap.set(x.imei.toLowerCase(), x);
+                  });
+                  const finalLocs = [...mergedMap.values()];
+                  setLocations(finalLocs);
+                  if (finalLocs.length > 0) {
+                    const matched = finalLocs.find((x) => x.label === savedLoc || x.imei === savedImei)
+                      || (savedLoc === MANUAL_LOC_LABEL ? null : finalLocs[0]);
+                    if (matched) {
+                      setPickedLabel(matched.label);
+                      setImeiInput(matched.imei);
+                    }
                   }
                 } catch (_) {
-                  if (active && !savedLoc) setPickedLabel(MANUAL_LOC_LABEL);
+                  // Kekalkan PRESET_TABLET_LOCATIONS jika gagal muat turun
                 } finally {
                   if (active) setLoadingLocs(false);
                 }
@@ -1389,12 +1414,12 @@ jobs:
               setEncryptedToken('');
               setErr('');
               setOk('');
+              await SecureStore.setItemAsync('TABLET_DEVICE_LOC', label);
               if (label === MANUAL_LOC_LABEL) return;
               const found = locations.find((x) => x.label === label);
-              if (found) {
+              if (found && found.imei) {
                 setImeiInput(found.imei);
                 await SecureStore.setItemAsync('TABLET_DEVICE_IMEI', found.imei);
-                await SecureStore.setItemAsync('TABLET_DEVICE_LOC', found.label);
               }
             };
 
@@ -1470,7 +1495,7 @@ jobs:
                 <View style={{ padding: 16, gap: 14 }}>
                   <Card title="Pilih Lokasi Tablet QR" icon="📍" tint={C.primary}>
                     <Text style={s.lbl}>
-                      {loadingLocs ? 'Memuat turun senarai lokasi daripada pelayan…' : 'Pilih lokasi tablet yang ingin diuji:'}
+                      {loadingLocs ? 'Menyegerakkan senarai lokasi…' : 'Pilih lokasi tablet yang ingin diuji:'}
                     </Text>
                     <Select
                       value={pickedLabel}
@@ -1483,10 +1508,10 @@ jobs:
                       IMEI Peranti ({pickedLabel === MANUAL_LOC_LABEL ? 'Manual' : 'Auto dari lokasi'}):
                     </Text>
                     <TextInput
-                      style={[s.in, pickedLabel !== MANUAL_LOC_LABEL && locations.length > 0 && { opacity: 0.75 }]}
+                      style={[s.in, pickedLabel !== MANUAL_LOC_LABEL && { opacity: 0.75 }]}
                       value={imeiInput}
                       onChangeText={setImeiInput}
-                      editable={pickedLabel === MANUAL_LOC_LABEL || locations.length === 0}
+                      editable={pickedLabel === MANUAL_LOC_LABEL}
                       placeholder="Contoh: 772df402efe84b8293e95509af4b31e5"
                       placeholderTextColor={C.mute}
                       autoCapitalize="none"
@@ -1538,6 +1563,7 @@ jobs:
               </ScrollView>
             );
           }
+
           const ProfileView = ({ sess, back, onCheckUpdate, checkingUpdate }) => {
             const { C, s, themeMode, changeTheme } = useT();
             const name = sess?.name || 'Pengguna';
@@ -1773,9 +1799,9 @@ jobs:
                     {mode === 'qr' && (
                       <>
                         <Btn label="Muat Naik QR dari Galeri" onPress={pickQr} icon="🖼" kind="ghost" />
-                        {onOpenGen ? (
+                        {onOpenGen && (
                           <Btn label="Jana Kod QR" onPress={onOpenGen} icon="🔲" kind="ghost" />
-                        ) : null}
+                        )}
                       </>
                     )}
                   </View>
@@ -2055,7 +2081,7 @@ jobs:
             const headers = { Accept: 'application/json', imei: String(deviceId()) };
             const clean = Object.entries(body).filter(([, v]) => v !== undefined && v !== null);
             let payload, qs = '';
-            if (get) qs = '?' + clean.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&');
+            if (get) qs = clean.length ? '?' + clean.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&') : '';
             else if (kind === 'form') {
               headers['Content-Type'] = 'application/x-www-form-urlencoded';
               payload = clean.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
@@ -2206,13 +2232,22 @@ jobs:
                 o.forEach((item) => walk(item, d + 1));
                 return;
               }
-              if (o.imei && (o.location || o.name || o.label)) {
-                const locName = String(o.location || o.name || o.label).trim();
+              const imeiVal = o.imei ?? o.device_imei ?? o.kod ?? o.code;
+              const locVal = o.location ?? o.lokasi ?? o.name ?? o.label ?? o.title ?? o.description;
+              if (imeiVal && locVal && typeof imeiVal !== 'object' && typeof locVal !== 'object') {
+                const locName = String(locVal).trim();
                 const typeStr = o.type ? ` (${o.type})` : '';
                 list.push({
                   label: `${locName}${typeStr}`,
                   location: locName,
-                  imei: String(o.imei).trim(),
+                  imei: String(imeiVal).trim(),
+                });
+                return;
+              }
+              const entries = Object.entries(o);
+              if (entries.length > 0 && entries.every(([k, v]) => typeof v === 'string' && k.length >= 8 && v.length >= 2)) {
+                entries.forEach(([k, v]) => {
+                  list.push({ label: v.trim(), location: v.trim(), imei: k.trim() });
                 });
                 return;
               }
@@ -2221,7 +2256,8 @@ jobs:
             walk(r, 0);
             const unique = new Map();
             list.forEach((x) => {
-              if (!unique.has(x.imei)) unique.set(x.imei, x);
+              const k = `${x.label}::${x.imei}`;
+              if (!unique.has(k)) unique.set(k, x);
             });
             return [...unique.values()];
           }
@@ -2297,7 +2333,7 @@ jobs:
         with:
           tag_name: "v1.1.0-${{ github.run_number }}"
           name: "iHR APK Build v1.1.0 #${{ github.run_number }}"
-          body: "Update Patch: Tablet Location Dropdown (Menara PGRM Tingkat 16), Live QR Generator, Admin Menu, Back Navigation, and API Timeout Fixes."
+          body: "Update Patch: Exact Location & IMEI Mapping (Menara PGRM 1/2, WISDEC 1/2, FIDEC 1/3, Pejabat Wilayah), Live QR Generator, Admin Menu, Back Navigation, and API Timeout Fixes."
           draft: false
           prerelease: false
           files: app/android/app/build/outputs/apk/release/*.apk
