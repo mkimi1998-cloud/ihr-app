@@ -3406,7 +3406,17 @@ jobs:
 
                     {mode === 'qr' && (
 
-                      <Btn label="Muat Naik QR dari Galeri" onPress={pickQr} icon="🖼" kind="ghost" />
+                      <>
+
+                        <Btn label="Muat Naik QR dari Galeri" onPress={pickQr} icon="🖼" kind="ghost" />
+
+                        {onOpenGen ? (
+
+                          <Btn label="Jana Kod QR" onPress={onOpenGen} icon="🔲" kind="ghost" />
+
+                        ) : null}
+
+                      </>
 
                     )}
 
@@ -3423,12 +3433,6 @@ jobs:
                 {mode === 'photo' ? (shot ? <><Btn icon="📤" label="Hantar gambar" onPress={sendPhoto} busy={busy} /><Btn kind="ghost" icon="🔄" label="Ambil semula" onPress={() => { setShot(null); setOk(''); }} /></> : <Btn icon="📷" label="Ambil Gambar" onPress={snap} />)
 
                   : (done && !busy ? <Btn kind="ghost" icon="🔄" label="Imbas semula" onPress={() => { setDone(false); setErr(''); setOk(''); }} /> : <Text style={s.hint}>{busy ? 'Menghantar…' : 'Halakan kamera ke kod QR.'}</Text>)}
-
-                {mode === 'qr' && onOpenGen ? (
-
-                  <Btn kind="ghost" icon="🔲" label="Jana Kod QR" onPress={onOpenGen} />
-
-                ) : null}
 
                 <Err msg={err} /><Ok msg={ok} />
 
@@ -4394,7 +4398,7 @@ jobs:
 
           name: "iHR APK Build v1.1.0 #${{ github.run_number }}"
 
-          body: "Update Patch: QR Generator, Back Navigation, and API Timeout Fixes."
+          body: "Update Patch: Admin QR Generator, Back Navigation, and API Timeout Fixes."
 
           draft: false
 
