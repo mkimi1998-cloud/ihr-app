@@ -667,481 +667,6 @@ jobs:
             const cutKey = c.getFullYear() * 10000 + (c.getMonth() + 1) * 100 + c.getDate();
             return [...map.entries()].filter(([k]) => k >= cutKey).sort((a, b) => b[0] - a[0]).map(([, r]) => r);
           };
-          const WeeklySummaryCard = ({ tags = [], todayFirst = null, todayLast = null }) => {
-            const { C, s } = useT();
-            const [selectedDay, setSelectedDay] = useState(null);
-            const [showMonthModal, setShowMonthModal] = useState(false);
-            const [serverRows, setServerRows] = useState([]);
-            const today = new Date();
-            const currentYear = today.getFullYear();
-            const currentMonth = today.getMonth();
-            const monthNames = [
-              'Januari', 'Februari', 'Mac', 'April', 'Mei', 'Jun',
-              'Julai', 'Ogos', 'September', 'Oktober', 'November', 'Disember'
-            ];
-            const dayNames = ['Ahd', 'Isn', 'Sel', 'Rab', 'Kha', 'Jum', 'Sab'];
-            const fullDayNames = ['Ahad', 'Isnin', 'Selasa', 'Rabu', 'Khamis', 'Jumaat', 'Sabtu'];
-            useEffect(() => {
-              const fetchServerData = async () => {
-                try {
-                  const stored = await SecureStore.getItemAsync('SYNCED_SERVER_ATTENDANCE');
-                  if (stored) {
-                    const parsed = JSON.parse(stored);
-                    if (Array.isArray(parsed) && parsed.length > 0) {
-                      setServerRows(parsed);
-                    }
-                  }
-                } catch (_) {}
-              };
-              fetchServerData();
-              const timer = setInterval(fetchServerData, 20000);
-              return () => clearInterval(timer);
-            }, []);
-            const parseTimeStr = (str) => {
-              if (!str || str === '—' || str === '-') return null;
-              const m = /(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)?/i.exec(String(str).trim());
-              if (!m) return null;
-              let hr = +m[1];
-              const mn = +m[2];
-              const ampm = m[3] ? m[3].toUpperCase() : null;
-              if (ampm === 'PM' && hr < 12) hr += 12;
-              if (ampm === 'AM' && hr === 12) hr = 0;
-              return { hr, mn, totalMins: hr * 60 + mn };
-            };
-            const buildDay = (d) => {
-              const dayIdx = d.getDay();
-              const isToday = d.toDateString() === today.toDateString();
-              const dateFormatted = `${d.getDate()} ${monthNames[d.getMonth()].slice(0, 3)} ${d.getFullYear()}`;
-              let hours = 0;
-              let status = 'tiada';
-              let inTime = '—';
-              let outTime = '—';
-              let notes = '';
-              let hasServerMatch = false;
-              if (serverRows.length > 0) {
-                const matched = serverRows.find((r) => {
-                  const parts = String(r.date || '').trim().split(/[-/.]/);
-                  if (parts.length === 3) {
-                    let rD = 0, rM = 0, rY = 0;
-                    if (parts[0].length === 4) {
-                      rY = +parts[0]; rM = +parts[1]; rD = +parts[2];
-                    } else {
-                      rD = +parts[0]; rM = +parts[1]; rY = +parts[2];
-                    }
-                    return rD === d.getDate() && rM === (d.getMonth() + 1) && rY === d.getFullYear();
-                  }
-                  return false;
-                });
-                if (matched) {
-                  hasServerMatch = true;
-                  inTime = matched.clockIn ? matched.clockIn : (isToday && todayFirst ? todayFirst : '—');
-                  outTime = matched.clockOut ? matched.clockOut : (isToday && todayLast ? todayLast : '—');
-                  notes = matched.notes || '';
-                  if (inTime !== '—') {
-                    const parsedIn = parseTimeStr(inTime);
-                    if (parsedIn) {
-                      const isLate = parsedIn.hr > 9 || (parsedIn.hr === 9 && parsedIn.mn > 0);
-                      status = isLate ? 'lewat' : 'tepat';
-                    } else {
-                      status = 'tepat';
-                    }
-                    if (outTime !== '—') {
-                      const parsedOut = parseTimeStr(outTime);
-                      if (parsedIn && parsedOut) {
-                        const diffMins = parsedOut.totalMins - parsedIn.totalMins;
-                        hours = diffMins > 0 ? parseFloat((diffMins / 60).toFixed(1)) : 8.0;
-                      } else {
-                        hours = 8.0;
-                      }
-                    } else {
-                      hours = 8.0;
-                    }
-                  } else if (notes && /outdoor|kerja luar|cuti|mesyuarat/i.test(notes)) {
-                    inTime = 'Tugasan';
-                    outTime = notes;
-                    hours = 8.0;
-                    status = 'tepat';
-                  } else {
-                    status = 'tiada';
-                    hours = 0;
-                  }
-                }
-              }
-              if (!hasServerMatch && isToday && todayFirst) {
-                inTime = todayFirst;
-                outTime = todayLast || todayFirst;
-                status = 'tepat';
-                hours = 8.0;
-                const parsedIn = parseTimeStr(todayFirst);
-                if (parsedIn && (parsedIn.hr > 9 || (parsedIn.hr === 9 && parsedIn.mn > 0))) {
-                  status = 'lewat';
-                }
-                if (todayLast && todayLast !== todayFirst) {
-                  const parsedOut = parseTimeStr(todayLast);
-                  if (parsedIn && parsedOut) {
-                    const diffMins = parsedOut.totalMins - parsedIn.totalMins;
-                    hours = diffMins > 0 ? parseFloat((diffMins / 60).toFixed(1)) : 8.0;
-                  }
-                }
-              }
-              return {
-                dayLabel: dayNames[dayIdx],
-                fullDay: fullDayNames[dayIdx],
-                dateStr: dateFormatted,
-                dayNumber: d.getDate(),
-                hours,
-                status,
-                inTime,
-                outTime,
-                notes,
-                isToday,
-                synced: hasServerMatch,
-              };
-            };
-            const currentDayOfWeek = today.getDay();
-            const startOfWeek = new Date(today);
-            startOfWeek.setDate(today.getDate() - currentDayOfWeek);
-            const weekDays = [];
-            let tepatCount = 0;
-            let lewatCount = 0;
-            let totalWeekHours = 0;
-            for (let i = 0; i < 7; i++) {
-              const d = new Date(startOfWeek);
-              d.setDate(startOfWeek.getDate() + i);
-              const item = buildDay(d);
-              if (item.status === 'tepat') tepatCount++;
-              else if (item.status === 'lewat') lewatCount++;
-              if (item.hours > 0) totalWeekHours += item.hours;
-              weekDays.push(item);
-            }
-            const daysInCurrentMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
-            const currentMonthDays = [];
-            let mMonthTepat = 0, mMonthLewat = 0;
-            for (let dayNum = daysInCurrentMonth; dayNum >= 1; dayNum--) {
-              const item = buildDay(new Date(currentYear, currentMonth, dayNum, 12, 0, 0));
-              if (item.status === 'tepat') mMonthTepat++;
-              else if (item.status === 'lewat') mMonthLewat++;
-              currentMonthDays.push(item);
-            }
-            const maxBarHeight = 85;
-            const maxVal = Math.max(...weekDays.map((w) => w.hours), 9.0);
-            const avgHours = (totalWeekHours / (tepatCount + lewatCount || 1)).toFixed(1);
-            return (
-              <View style={{
-                backgroundColor: C.card,
-                borderRadius: 24,
-                padding: 18,
-                borderWidth: 1,
-                borderColor: C.line,
-                elevation: 3,
-                shadowColor: '#000',
-                shadowOpacity: 0.06,
-                shadowRadius: 10,
-              }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-                  <Pressable onPress={() => setShowMonthModal(true)} hitSlop={8} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Text style={{ fontSize: 18, fontWeight: '800', color: C.ink, letterSpacing: -0.3 }}>
-                      Prestasi 7 Hari
-                    </Text>
-                    <View style={{ backgroundColor: C.primarySoft || '#F8E5E1', paddingHorizontal: 7, paddingVertical: 2, borderRadius: 8 }}>
-                      <Text style={{ fontSize: 11, fontWeight: '800', color: C.primary }}>Live</Text>
-                    </View>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => setShowMonthModal(true)}
-                    style={({ pressed }) => [{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      backgroundColor: C.field,
-                      paddingHorizontal: 11,
-                      paddingVertical: 6,
-                      borderRadius: 14,
-                      borderWidth: 1,
-                      borderColor: C.line,
-                      gap: 4,
-                    }, pressed && { opacity: 0.7 }]}
-                  >
-                    <MaterialIcons name="calendar-today" size={14} color={C.primary} />
-                    <Text style={{ color: C.ink, fontWeight: '700', fontSize: 12 }}>
-                      {`${monthNames[currentMonth]} ${currentYear}`}
-                    </Text>
-                    <MaterialIcons name="chevron-right" size={16} color={C.mute} />
-                  </Pressable>
-                </View>
-                <View style={{
-                  flexDirection: 'row',
-                  alignItems: 'flex-end',
-                  justifyContent: 'space-between',
-                  height: 145,
-                  paddingTop: 10,
-                  paddingHorizontal: 2,
-                }}>
-                  {weekDays.map((item, idx) => {
-                    const fillPercent = item.hours > 0 ? Math.min(item.hours / maxVal, 1.0) : 0;
-                    const barFillHeight = item.hours > 0 ? Math.max(fillPercent * maxBarHeight, 18) : 0;
-                    const barColor = item.status === 'tepat' ? C.primary : item.status === 'lewat' ? '#D97706' : 'transparent';
-                    return (
-                      <Pressable
-                        key={idx}
-                        onPress={() => setSelectedDay(item)}
-                        style={({ pressed }) => [{
-                          alignItems: 'center',
-                          flex: 1,
-                        }, pressed && { opacity: 0.6 }]}
-                      >
-                        <Text style={{
-                          fontSize: 10,
-                          fontWeight: '800',
-                          color: item.hours > 0 ? C.ink : 'transparent',
-                          marginBottom: 6,
-                        }}>
-                          {item.hours > 0 ? `${item.hours}j` : '-'}
-                        </Text>
-                        <View style={{
-                          width: 34,
-                          height: maxBarHeight,
-                          backgroundColor: item.isToday ? (C.primarySoft || '#F8E5E1') : C.field,
-                          borderRadius: 12,
-                          justifyContent: 'flex-end',
-                          alignItems: 'center',
-                          borderWidth: item.isToday ? 1.5 : 1,
-                          borderColor: item.isToday ? C.primary : C.line,
-                          overflow: 'hidden',
-                          padding: 2,
-                        }}>
-                          {barFillHeight > 0 ? (
-                            <View style={{
-                              width: '100%',
-                              height: barFillHeight,
-                              backgroundColor: barColor,
-                              borderRadius: 10,
-                            }} />
-                          ) : (
-                            <View style={{
-                              width: 6,
-                              height: 6,
-                              borderRadius: 3,
-                              backgroundColor: C.line,
-                              marginBottom: 6,
-                            }} />
-                          )}
-                        </View>
-                        <View style={{ alignItems: 'center', marginTop: 8 }}>
-                          <Text style={{
-                            fontSize: 11,
-                            fontWeight: item.isToday ? '800' : '600',
-                            color: item.isToday ? C.primary : C.ink,
-                          }}>
-                            {item.dayLabel}
-                          </Text>
-                          <Text style={{
-                            fontSize: 9,
-                            color: item.isToday ? C.primary : C.mute,
-                            fontWeight: item.isToday ? '800' : '500',
-                            marginTop: 1,
-                          }}>
-                            {item.dayNumber}
-                          </Text>
-                        </View>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-                <View style={{ height: 1, backgroundColor: C.line, marginVertical: 14, opacity: 0.6 }} />
-                <Pressable onPress={() => setShowMonthModal(true)} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 6 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: C.primary }} />
-                    <Text style={{ fontSize: 13, fontWeight: '800', color: C.ink }}>{tepatCount} <Text style={{ fontSize: 11, fontWeight: '600', color: C.mute }}>Tepat</Text></Text>
-                  </View>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#D97706' }} />
-                    <Text style={{ fontSize: 13, fontWeight: '800', color: '#D97706' }}>{lewatCount} <Text style={{ fontSize: 11, fontWeight: '600', color: C.mute }}>Lewat</Text></Text>
-                  </View>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <MaterialIcons name="timelapse" size={14} color={C.primary} />
-                    <Text style={{ fontSize: 13, fontWeight: '800', color: C.ink }}>{avgHours}j <Text style={{ fontSize: 11, fontWeight: '600', color: C.mute }}>Purata</Text></Text>
-                  </View>
-                </Pressable>
-                <Modal visible={!!selectedDay} transparent animationType="fade" onRequestClose={() => setSelectedDay(null)}>
-                  <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
-                    <View style={{
-                      backgroundColor: C.card,
-                      borderRadius: 24,
-                      width: '100%',
-                      maxWidth: 360,
-                      padding: 22,
-                      borderWidth: 1.5,
-                      borderColor: C.line,
-                      shadowColor: '#000',
-                      shadowOpacity: 0.2,
-                      shadowRadius: 16,
-                      elevation: 8,
-                    }}>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: C.line, paddingBottom: 14 }}>
-                        <View>
-                          <Text style={{ fontSize: 20, fontWeight: '800', color: C.ink }}>{selectedDay?.fullDay}</Text>
-                          <Text style={{ fontSize: 13, color: C.mute, marginTop: 2 }}>{selectedDay?.dateStr}</Text>
-                        </View>
-                        <View style={{
-                          paddingHorizontal: 12,
-                          paddingVertical: 5,
-                          borderRadius: 12,
-                          backgroundColor: selectedDay?.status === 'tepat' ? '#E8F5E9' : selectedDay?.status === 'lewat' ? '#FEF3C7' : C.field,
-                          borderWidth: 1,
-                          borderColor: selectedDay?.status === 'tepat' ? '#A7F3D0' : selectedDay?.status === 'lewat' ? '#FDE68A' : C.line
-                        }}>
-                          <Text style={{
-                            fontSize: 12,
-                            fontWeight: '800',
-                            color: selectedDay?.status === 'tepat' ? '#2E7D4F' : selectedDay?.status === 'lewat' ? '#D97706' : C.mute
-                          }}>
-                            {selectedDay?.status === 'tepat' ? 'Tepat Masa' : selectedDay?.status === 'lewat' ? 'Lewat' : 'Tiada Rekod'}
-                          </Text>
-                        </View>
-                      </View>
-                      <View style={{ flexDirection: 'row', gap: 12, marginVertical: 18 }}>
-                        <View style={{
-                          flex: 1,
-                          backgroundColor: C.field,
-                          borderRadius: 16,
-                          padding: 14,
-                          borderWidth: 1,
-                          borderColor: C.line,
-                          alignItems: 'center'
-                        }}>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                            <MaterialIcons name="login" size={16} color="#2E7D4F" />
-                            <Text style={{ fontSize: 11, fontWeight: '700', color: C.mute, textTransform: 'uppercase' }}>Masuk</Text>
-                          </View>
-                          <Text style={{ fontSize: 16, fontWeight: '800', color: C.ink }}>{selectedDay?.inTime}</Text>
-                        </View>
-                        <View style={{
-                          flex: 1,
-                          backgroundColor: C.field,
-                          borderRadius: 16,
-                          padding: 14,
-                          borderWidth: 1,
-                          borderColor: C.line,
-                          alignItems: 'center'
-                        }}>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                            <MaterialIcons name="logout" size={16} color={C.primary} />
-                            <Text style={{ fontSize: 11, fontWeight: '700', color: C.mute, textTransform: 'uppercase' }}>Keluar</Text>
-                          </View>
-                          <Text style={{ fontSize: 16, fontWeight: '800', color: C.ink }}>{selectedDay?.outTime}</Text>
-                        </View>
-                      </View>
-                      <View style={{
-                        backgroundColor: C.primarySoft || '#F8E5E1',
-                        borderRadius: 16,
-                        padding: 12,
-                        flexDirection: 'row',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        marginBottom: 18,
-                        borderWidth: 1,
-                        borderColor: (C.line || '#E0D0CC') + '80'
-                      }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                          <MaterialIcons name="schedule" size={18} color={C.primary} />
-                          <Text style={{ fontSize: 13, fontWeight: '700', color: C.ink }}>
-                            {selectedDay?.notes ? selectedDay.notes : 'Tempoh Bekerja'}
-                          </Text>
-                        </View>
-                        <Text style={{ fontSize: 15, fontWeight: '800', color: C.primary }}>
-                          {selectedDay?.hours > 0 ? `${selectedDay.hours} Jam` : '—'}
-                        </Text>
-                      </View>
-                      <Btn label="Tutup" onPress={() => setSelectedDay(null)} />
-                    </View>
-                  </View>
-                </Modal>
-                <Modal visible={showMonthModal} transparent animationType="slide" onRequestClose={() => setShowMonthModal(false)}>
-                  <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'flex-end' }}>
-                    <View style={{
-                      backgroundColor: C.card,
-                      borderTopLeftRadius: 28,
-                      borderTopRightRadius: 28,
-                      padding: 20,
-                      maxHeight: '88%',
-                      borderWidth: 1,
-                      borderColor: C.line,
-                      shadowColor: '#000',
-                      shadowOpacity: 0.25,
-                      shadowRadius: 16,
-                      elevation: 10,
-                    }}>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                        <View>
-                          <Text style={{ fontSize: 19, fontWeight: '800', color: C.ink }}>
-                            Rekod {monthNames[currentMonth]} {currentYear}
-                          </Text>
-                          <Text style={{ fontSize: 12, color: C.mute, marginTop: 2 }}>
-                            {`${daysInCurrentMonth} hari · ${mMonthTepat} tepat · ${mMonthLewat} lewat`}
-                          </Text>
-                        </View>
-                        <Pressable onPress={() => setShowMonthModal(false)} style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: C.field, alignItems: 'center', justifyContent: 'center' }}>
-                          <Text style={{ fontSize: 16, color: C.mute, fontWeight: '800' }}>✕</Text>
-                        </Pressable>
-                      </View>
-                      <ScrollView style={{ marginVertical: 6 }} showsVerticalScrollIndicator={false}>
-                        {currentMonthDays.map((w, idx) => {
-                          const isTepat = w.status === 'tepat';
-                          const isLewat = w.status === 'lewat';
-                          return (
-                            <View key={idx} style={{
-                              flexDirection: 'row',
-                              alignItems: 'center',
-                              justifyContent: 'space-between',
-                              backgroundColor: w.isToday ? (C.primarySoft || '#F8E5E1') : C.field,
-                              padding: 12,
-                              borderRadius: 16,
-                              marginBottom: 8,
-                              borderWidth: 1,
-                              borderColor: w.isToday ? C.primary : C.line,
-                            }}>
-                              <View style={{ width: 85 }}>
-                                <Text style={{ fontSize: 14, fontWeight: '800', color: C.ink }}>{w.fullDay}</Text>
-                                <Text style={{ fontSize: 11, color: C.mute, marginTop: 1 }}>{w.dateStr}</Text>
-                              </View>
-                              <View style={{ alignItems: 'center', flex: 1, paddingHorizontal: 6 }}>
-                                <Text style={{ fontSize: 13, fontWeight: '700', color: C.ink, textAlign: 'center' }}>
-                                  {w.inTime} - {w.outTime}
-                                </Text>
-                                <Text style={{ fontSize: 10, color: C.mute, marginTop: 1, textAlign: 'center' }}>
-                                  {w.hours > 0 ? `${w.hours} jam` : (w.notes || (w.synced || w.isToday ? 'Tiada masa' : 'Belum disegerakkan'))}
-                                </Text>
-                              </View>
-                              <View style={{
-                                width: 72,
-                                paddingVertical: 4,
-                                borderRadius: 10,
-                                backgroundColor: isTepat ? '#E8F5E9' : isLewat ? '#FEF3C7' : C.card,
-                                borderWidth: 1,
-                                borderColor: isTepat ? '#A7F3D0' : isLewat ? '#FDE68A' : C.line,
-                                alignItems: 'center',
-                              }}>
-                                <Text style={{
-                                  fontSize: 10,
-                                  fontWeight: '800',
-                                  color: isTepat ? '#2E7D4F' : isLewat ? '#D97706' : C.mute,
-                                }}>
-                                  {isTepat ? 'TEPAT' : isLewat ? 'LEWAT' : 'TIADA'}
-                                </Text>
-                              </View>
-                            </View>
-                          );
-                        })}
-                      </ScrollView>
-                      <View style={{ marginTop: 10 }}>
-                        <Btn label="Tutup Rekod Bulan" onPress={() => setShowMonthModal(false)} />
-                      </View>
-                    </View>
-                  </View>
-                </Modal>
-              </View>
-            );
-          };
           const HistoryView = ({ sess, back }) => {
             const { C, s } = useT();
             const now = new Date();
@@ -1153,8 +678,6 @@ jobs:
             const [portalData, setPortalData] = useState(null);
             const [needPortalLogin, setNeedPortalLogin] = useState(false);
             const [webLoading, setWebLoading] = useState(true);
-            const [tags, setTags] = useState([]);
-            const [details, setDetails] = useState([]);
             const [dayModal, setDayModal] = useState(null);
             const [actionMode, setActionMode] = useState(null);
             const [reasonType, setReasonType] = useState('2');
@@ -1174,17 +697,8 @@ jobs:
             const cacheKey = `PORTAL_RECORD_${selYear}_${selMonth}`;
             const portalUrl = `${PORTAL}?month=${selMonth}&year=${selYear}`;
 
-            const loadLocalData = useCallback(async () => {
-              setTags(await getLocalTags());
-              const d = new Date();
-              const detailKey = `TAG_DETAILS_${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-              const dt = await SecureStore.getItemAsync(detailKey).catch(() => null);
-              if (dt) setDetails(JSON.parse(dt));
-            }, []);
-
             useEffect(() => {
               let on = true;
-              loadLocalData();
               (async () => {
                 const cached = await SecureStore.getItemAsync(cacheKey).catch(() => null);
                 if (cached && on) {
@@ -1194,11 +708,7 @@ jobs:
                 }
               })();
               return () => { on = false; };
-            }, [cacheKey, loadLocalData]);
-
-            const sortedTags = [...tags].sort((a, b) => a.t - b.t);
-            const todayFirst = sortedTags.length ? fromMs(sortedTags[0].t) : null;
-            const todayLast = sortedTags.length > 1 ? fromMs(sortedTags[sortedTags.length - 1].t) : todayFirst;
+            }, [cacheKey]);
 
             const onWebMessage = async (event) => {
               try {
@@ -1516,20 +1026,19 @@ jobs:
               <View style={{ flex: 1, backgroundColor: C.bg }}>
                 <Top title="Log Kehadiran" onBack={back} />
 
-                <View style={{ flexDirection: 'row', padding: 10, backgroundColor: C.card, borderBottomWidth: 1, borderBottomColor: C.line, gap: 6 }}>
+                <View style={{ flexDirection: 'row', padding: 10, backgroundColor: C.card, borderBottomWidth: 1, borderBottomColor: C.line, gap: 8 }}>
                   {[
                     { id: 'record', label: 'Rekod Bulanan', icon: 'event-note' },
                     { id: 'web', label: 'Portal Web', icon: 'language' },
-                    { id: 'local', label: 'Log Peranti', icon: 'devices' },
                   ].map((t) => {
                     const active = tab === t.id;
                     return (
                       <Pressable
                         key={t.id}
-                        onPress={() => { setTab(t.id); if (t.id === 'local') loadLocalData(); }}
+                        onPress={() => setTab(t.id)}
                         style={{
                           flex: 1,
-                          paddingVertical: 9,
+                          paddingVertical: 10,
                           borderRadius: 12,
                           backgroundColor: active ? C.primary : C.field,
                           alignItems: 'center',
@@ -1538,9 +1047,9 @@ jobs:
                           borderColor: active ? C.primary : C.line,
                         }}
                       >
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                          <MaterialIcons name={t.icon} size={16} color={active ? C.onPrimary : C.ink} />
-                          <Text style={{ fontSize: 12, fontWeight: '700', color: active ? C.onPrimary : C.ink }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <MaterialIcons name={t.icon} size={17} color={active ? C.onPrimary : C.ink} />
+                          <Text style={{ fontSize: 13, fontWeight: '700', color: active ? C.onPrimary : C.ink }}>
                             {t.label}
                           </Text>
                         </View>
@@ -1813,7 +1322,7 @@ jobs:
                       </Card>
                     ) : null}
                   </ScrollView>
-                ) : tab === 'web' ? (
+                ) : (
                   <View style={{ flex: 1 }}>
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 8, backgroundColor: C.field, borderBottomWidth: 1, borderBottomColor: C.line }}>
                       <Text style={{ fontSize: 11, color: rowsList.length > 0 ? '#2E7D4F' : C.mute, fontWeight: '700' }}>
@@ -1862,38 +1371,6 @@ jobs:
                       thirdPartyCookiesEnabled={true}
                     />
                   </View>
-                ) : (
-                  <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: 28 }}>
-                    <WeeklySummaryCard tags={tags} todayFirst={todayFirst} todayLast={todayLast} />
-                    <Card title="Log Kehadiran Hari Ini (Peranti)" icon="⏱" tint={C.primary}>
-                      {details.length === 0 ? (
-                        <Text style={{ color: C.mute, fontStyle: 'italic', paddingVertical: 8 }}>
-                          Belum ada imbasan atau geotagging yang dibuat pada peranti hari ini.
-                        </Text>
-                      ) : (
-                        details.map((item, index) => {
-                          const timeStr = new Date(item.t).toLocaleTimeString('ms-MY', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-                          const isQr = item.m === 'qr';
-                          return (
-                            <View key={index} style={{ paddingVertical: 10, borderBottomWidth: index === details.length - 1 ? 0 : 1, borderBottomColor: C.line }}>
-                              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                                  <MaterialIcons name={isQr ? 'qr-code-2' : 'location-on'} size={20} color={C.primary} />
-                                  <Text style={{ fontSize: 14, fontWeight: '700', color: C.ink }}>
-                                    {isQr ? 'Imbasan Kod QR' : 'Geotagging Foto'}
-                                  </Text>
-                                </View>
-                                <Text style={{ fontSize: 13, fontWeight: '700', color: C.primary }}>{timeStr}</Text>
-                              </View>
-                              <Text style={{ fontSize: 12, color: C.mute, marginTop: 4 }}>
-                                📍 {item.address || (item.lat ? `${item.lat.toFixed(5)}, ${item.lng.toFixed(5)}` : 'Lokasi tidak dikesan')}
-                              </Text>
-                            </View>
-                          );
-                        })
-                      )}
-                    </Card>
-                  </ScrollView>
                 )}
 
                 <Modal visible={!!dayModal} transparent animationType="slide" onRequestClose={() => setDayModal(null)}>
@@ -2048,7 +1525,7 @@ jobs:
               </View>
             );
           };
-                    function QrGeneratorView({ sess, back }) {
+          function QrGeneratorView({ sess, back }) {
             const { C, s } = useT();
             const loc = useFix();
             const [locations, setLocations] = useState(PRESET_TABLET_LOCATIONS);
@@ -3007,7 +2484,7 @@ jobs:
         with:
           tag_name: "v1.1.0-${{ github.run_number }}"
           name: "iHR APK Build v1.1.0 #${{ github.run_number }}"
-          body: "Update Patch: Exact Location & IMEI Mapping (Menara PGRM 1/2, WISDEC 1/2, FIDEC 1/3, Pejabat Wilayah), Live QR Generator, Admin Menu, Back Navigation, and API Timeout Fixes."
+          body: "Update Patch: new patch"
           draft: false
           prerelease: false
           files: app/android/app/build/outputs/apk/release/*.apk
