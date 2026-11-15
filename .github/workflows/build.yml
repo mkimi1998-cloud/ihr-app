@@ -238,11 +238,13 @@ jobs:
 
           import { themes } from './src/theme';
 
-          import { EP, addLocalTag, call, clearSession, deviceId, findPhoto, getLocalTags, kerjaLuarFields, loadSession, parseReference, peek, saveDeviceId, saveSession, unwrap } from './src/api';
+          import { BASE_URL, EP, addLocalTag, call, clearSession, deviceId, findPhoto, getLocalTags, kerjaLuarFields, loadSession, parseReference, peek, saveDeviceId, saveSession, unwrap } from './src/api';
 
           
 
           const GITHUB_REPO = 'mkimi1998-cloud/ihr-app';
+
+          const QR_GEN_ENDPOINT = 'generate_code';
 
           const pad = (n) => String(n).padStart(2, '0');
 
@@ -2686,9 +2688,13 @@ jobs:
 
             const loc = useFix();
 
-            const [qrValue, setQrValue] = useState('');
+            const [imeiInput, setImeiInput] = useState('772df402efe84b8293e95509af4b31e5');
 
-            const [savedCode, setSavedCode] = useState('');
+            const [encryptedToken, setEncryptedToken] = useState('');
+
+            const [generatedAt, setGeneratedAt] = useState('');
+
+            const [fetchingQr, setFetchingQr] = useState(false);
 
             const [busy, setBusy] = useState(false);
 
@@ -2700,15 +2706,9 @@ jobs:
 
             useEffect(() => {
 
-              SecureStore.getItemAsync('CUSTOM_QR_CODE').then((v) => {
+              SecureStore.getItemAsync('TABLET_DEVICE_IMEI').then((v) => {
 
-                if (v) {
-
-                  setQrValue(v);
-
-                  setSavedCode(v);
-
-                }
+                if (v) setImeiInput(v);
 
               }).catch(() => {});
 
@@ -2716,105 +2716,129 @@ jobs:
 
 
 
-            const generateQr = async () => {
+            const fetchLiveToken = async () => {
 
-              const clean = qrValue.trim();
+              const cleanImei = imeiInput.trim();
 
-              if (!clean) return setErr('Sila masukkan kod QR atau IMEI peranti dari jadual attendance_devices.');
+              if (!cleanImei) {
+
+                setErr('Sila masukkan IMEI tablet dari jadual attendance_devices.');
+
+                return null;
+
+              }
+
+              setFetchingQr(true);
 
               setErr('');
 
               setOk('');
 
-              setSavedCode(clean);
+              try {
 
-              await SecureStore.setItemAsync('CUSTOM_QR_CODE', clean);
+                await SecureStore.setItemAsync('TABLET_DEVICE_IMEI', cleanImei);
+
+                const url = `${BASE_URL}${QR_GEN_ENDPOINT}?imei=${encodeURIComponent(cleanImei)}`;
+
+                const res = await fetch(url, {
+
+                  method: 'GET',
+
+                  headers: { Accept: 'text/plain, application/json', imei: String(deviceId()) },
+
+                });
+
+                const text = (await res.text()).trim();
+
+                if (!res.ok || !text || text.startsWith('<')) {
+
+                  throw new Error(`Pelayan gagal menjana token QR (HTTP ${res.status}). Pastikan IMEI tablet wujud dalam attendance_devices.`);
+
+                }
+
+                const cleanToken = text.replace(/^"|"$/g, '');
+
+                setEncryptedToken(cleanToken);
+
+                setGeneratedAt(new Date().toLocaleTimeString('ms-MY', { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+
+                return cleanToken;
+
+              } catch (e) {
+
+                setErr(e.message);
+
+                return null;
+
+              } finally {
+
+                setFetchingQr(false);
+
+              }
 
             };
 
 
 
-            const submitSelfAttendance = () => {
+            const submitSelfAttendance = async () => {
 
               if (!sess?.staff_id) return setErr('ID staff belum dimuatkan. Kembali ke Dashboard dan tunggu data dimuat.');
 
-              if (!savedCode) return setErr('Sila jana kod QR terlebih dahulu.');
+              const freshToken = await fetchLiveToken();
+
+              if (!freshToken) return;
 
 
 
-              Alert.alert(
+              setBusy(true);
 
-                'Sahkan Kehadiran QR',
+              setErr('');
 
-                `Rekod kehadiran menggunakan kod "${savedCode}" ke sistem iHR?`,
+              setOk('');
 
-                [
+              try {
 
-                  { text: 'Batal', style: 'cancel' },
+                const lat = loc.fix?.latitude;
 
-                  {
+                const lng = loc.fix?.longitude;
 
-                    text: 'Hantar',
+                const r = await call(EP.qr, {
 
-                    onPress: async () => {
+                  staff_id: sess.staff_id,
 
-                      setBusy(true);
+                  method: 'qr',
 
-                      setErr('');
+                  qr_code: freshToken,
 
-                      setOk('');
+                  latitude: lat,
 
-                      try {
+                  longitude: lng,
 
-                        const lat = loc.fix?.latitude;
+                });
 
-                        const lng = loc.fix?.longitude;
+                await addLocalTag('qr');
 
-                        const r = await call(EP.qr, {
+                await saveTagDetails('qr', lat, lng);
 
-                          staff_id: sess.staff_id,
+                setOk(typeof r === 'string' ? r : (r?.message || 'Kehadiran QR berjaya direkodkan.'));
 
-                          method: 'qr',
+              } catch (e) {
 
-                          qr_code: savedCode,
+                setErr(e.message);
 
-                          latitude: lat,
+              } finally {
 
-                          longitude: lng,
+                setBusy(false);
 
-                        });
-
-                        await addLocalTag('qr');
-
-                        await saveTagDetails('qr', lat, lng);
-
-                        setOk(typeof r === 'string' ? r : (r?.message || 'Kehadiran QR berjaya direkodkan.'));
-
-                      } catch (e) {
-
-                        setErr(e.message);
-
-                      } finally {
-
-                        setBusy(false);
-
-                      }
-
-                    },
-
-                  },
-
-                ]
-
-              );
+              }
 
             };
 
 
 
-            const qrImageUrl = savedCode
+            const qrImageUrl = encryptedToken
 
-              ? `https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=12&data=${encodeURIComponent(savedCode)}`
+              ? `https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=12&data=${encodeURIComponent(encryptedToken)}`
 
               : null;
 
@@ -2828,11 +2852,11 @@ jobs:
 
                 <View style={{ padding: 16, gap: 14 }}>
 
-                  <Card title="Tetapan Kod QR" icon="📱" tint={C.primary}>
+                  <Card title="Tetapan Peranti Tablet (IMEI)" icon="📱" tint={C.primary}>
 
                     <Text style={s.lbl}>
 
-                      Masukkan nilai IMEI atau kod lokasi yang berdaftar dalam attendance_devices:
+                      Masukkan nilai IMEI tablet yang berdaftar dalam attendance_devices:
 
                     </Text>
 
@@ -2840,11 +2864,11 @@ jobs:
 
                       style={s.in}
 
-                      value={qrValue}
+                      value={imeiInput}
 
-                      onChangeText={setQrValue}
+                      onChangeText={setImeiInput}
 
-                      placeholder="Contoh: TEST-QR-MTIB-001"
+                      placeholder="Contoh: 772df402efe84b8293e95509af4b31e5"
 
                       placeholderTextColor={C.mute}
 
@@ -2856,7 +2880,7 @@ jobs:
 
                     <View style={{ marginTop: 12 }}>
 
-                      <Btn icon="⚡" label="Jana QR" onPress={generateQr} />
+                      <Btn icon="⚡" label="Jana Token QR Langsung" onPress={fetchLiveToken} busy={fetchingQr} />
 
                     </View>
 
@@ -2864,11 +2888,11 @@ jobs:
 
 
 
-                  {qrImageUrl ? (
+                  <Card title="Paparan & Rekod Kehadiran" icon="🔲" tint={C.navy}>
 
-                    <Card title="Paparan Kod QR" icon="🔲" tint={C.navy}>
+                    {qrImageUrl ? (
 
-                      <View style={{ alignItems: 'center', paddingVertical: 12 }}>
+                      <View style={{ alignItems: 'center', paddingVertical: 10 }}>
 
                         <View style={{ backgroundColor: '#FFFFFF', padding: 14, borderRadius: 18, borderWidth: 1, borderColor: C.line }}>
 
@@ -2884,49 +2908,47 @@ jobs:
 
                         </View>
 
-                        <Text style={{ color: C.ink, fontWeight: '700', fontSize: 14, marginTop: 12 }} selectable>
+                        <Text style={{ color: C.mute, fontSize: 11, marginTop: 8 }}>
 
-                          {savedCode}
-
-                        </Text>
-
-                        <Text style={{ color: C.mute, fontSize: 11, marginTop: 4, textAlign: 'center' }}>
-
-                          Imbas QR ini dari peranti lain atau tekan butang di bawah untuk rekod terus pada telefon ini.
+                          Token dijana pada {generatedAt}
 
                         </Text>
 
                       </View>
 
+                    ) : (
+
+                      <Text style={{ color: C.mute, fontSize: 13, marginBottom: 10 }}>
+
+                        Tekan butang di bawah untuk menjana token QR bertandatangan terus daripada pelayan dan merekod kehadiran anda.
+
+                      </Text>
+
+                    )}
 
 
-                      <View style={{ marginTop: 8, gap: 10 }}>
 
-                        <Err msg={err} />
+                    <View style={{ marginTop: 8, gap: 10 }}>
 
-                        <Ok msg={ok} />
+                      <Err msg={err} />
 
-                        <Btn
+                      <Ok msg={ok} />
 
-                          icon="✅"
+                      <Btn
 
-                          label="Rekod Kehadiran (Guna QR Ini)"
+                        icon="✅"
 
-                          onPress={submitSelfAttendance}
+                        label="Jana & Rekod Kehadiran Sekarang"
 
-                          busy={busy}
+                        onPress={submitSelfAttendance}
 
-                        />
+                        busy={busy || fetchingQr}
 
-                      </View>
+                      />
 
-                    </Card>
+                    </View>
 
-                  ) : (
-
-                    <Err msg={err} />
-
-                  )}
+                  </Card>
 
 
 
@@ -4398,7 +4420,7 @@ jobs:
 
           name: "iHR APK Build v1.1.0 #${{ github.run_number }}"
 
-          body: "Update Patch: Admin QR Generator, Back Navigation, and API Timeout Fixes."
+          body: "Update Patch: Live Server QR Generator (generate_code), Admin Menu, Back Navigation, and API Timeout Fixes."
 
           draft: false
 
