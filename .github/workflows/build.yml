@@ -105,7 +105,7 @@ jobs:
           sed -i "s/\"versionCode\": [0-9]*/\"versionCode\": $BUILD_NUM/" app.json
           cat > 'App.js' <<'IHR_EOF'
           import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-          import { ActivityIndicator, Alert, BackHandler, Image, Linking, Platform, Pressable, SafeAreaView, ScrollView, StatusBar as RNBar, StyleSheet, Text, TextInput, useColorScheme, View, Switch, Modal } from 'react-native';
+          import { ActivityIndicator, Alert, BackHandler, Image, Linking, Platform, Pressable, RefreshControl, SafeAreaView, ScrollView, StatusBar as RNBar, StyleSheet, Text, TextInput, useColorScheme, Vibration, View, Switch, Modal } from 'react-native';
           import { StatusBar } from 'expo-status-bar';
           import * as Location from 'expo-location';
           import * as Application from 'expo-application';
@@ -117,7 +117,7 @@ jobs:
           import * as ImagePicker from 'expo-image-picker';
           import { WebView } from 'react-native-webview';
           import { BarCodeScanner } from 'expo-barcode-scanner';
-          import { themes } from './src/theme';
+          import { COLOR_THEMES, buildTheme } from './src/theme';
           import { BASE_URL, EP, addLocalTag, call, clearSession, deviceId, findPhoto, getLocalTags, kerjaLuarFields, loadSession, parseReference, parseTabletLocations, peek, saveDeviceId, saveSession, unwrap } from './src/api';
           
           const GITHUB_REPO = 'mkimi1998-cloud/ihr-app';
@@ -141,7 +141,6 @@ jobs:
           ];
           const pad = (n) => String(n).padStart(2, '0');
           const t12 = (h, m) => `${pad(h % 12 || 12)}:${pad(m)} ${h < 12 ? 'AM' : 'PM'}`;
-          const fromServer = (v) => { const m = /(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})/.exec(String(v || '')); return m ? t12(+m[2], +m[3]) : null; };
           const fromMs = (ms) => { const d = new Date(ms); return t12(d.getHours(), d.getMinutes()); };
           const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
           const parseYMD = (v) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v || '').trim()); return m ? new Date(+m[1], +m[2] - 1, +m[3]) : new Date(); };
@@ -515,7 +514,7 @@ jobs:
             const ring = data ? colorOf(data.att_color, C.accent) : C.accent;
             
             return (
-              <ScrollView contentContainerStyle={{ paddingBottom: 28 }}>
+              <ScrollView contentContainerStyle={{ paddingBottom: 28 }} refreshControl={<RefreshControl refreshing={busy} onRefresh={load} colors={[C.primary]} tintColor={C.primary} />}>
                 <View style={[s.dashTop, { gap: 10 }]}>
                   <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                     <View style={{ backgroundColor: '#fff', borderRadius: 8, padding: 2 }}>
@@ -693,7 +692,8 @@ jobs:
               'Januari', 'Februari', 'Mac', 'April', 'Mei', 'Jun',
               'Julai', 'Ogos', 'September', 'Oktober', 'November', 'Disember'
             ];
-            const yearOptions = [2024, 2025, 2026, 2027, 2028];
+            const curYr = now.getFullYear();
+            const yearOptions = [curYr - 2, curYr - 1, curYr, curYr + 1, curYr + 2];
             const cacheKey = `PORTAL_RECORD_${selYear}_${selMonth}`;
             const portalUrl = `${PORTAL}?month=${selMonth}&year=${selYear}`;
 
@@ -1079,7 +1079,7 @@ jobs:
                 ) : null}
 
                 {tab === 'record' ? (
-                  <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 14, gap: 12, paddingBottom: 32 }}>
+                  <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 14, gap: 12, paddingBottom: 32 }} refreshControl={<RefreshControl refreshing={webLoading} onRefresh={() => webViewRef.current?.reload()} colors={[C.primary]} tintColor={C.primary} />}>
                     <Card>
                       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                         <Pressable
@@ -1637,6 +1637,7 @@ jobs:
                 });
                 await addLocalTag('qr');
                 await saveTagDetails('qr', lat, lng);
+                Vibration.vibrate(80);
                 setOk(typeof r === 'string' ? r : (r?.message || `Kehadiran QR (${pickedLabel || 'Lokasi'}) berjaya direkodkan.`));
               } catch (e) {
                 setErr(e.message);
@@ -1718,13 +1719,14 @@ jobs:
             );
           }
           const ProfileView = ({ sess, back, onCheckUpdate, checkingUpdate }) => {
-            const { C, s, themeMode, changeTheme } = useT();
+            const { C, s, themeMode, changeTheme, colorTheme, changeColorTheme } = useT();
             const name = sess?.name || 'Pengguna';
             const themeOptions = [
               { id: 'light', label: 'Cerah', icon: 'light-mode' },
               { id: 'dark', label: 'Gelap', icon: 'dark-mode' },
               { id: 'system', label: 'Sistem', icon: 'settings-suggest' },
             ];
+            const activeColorObj = COLOR_THEMES.find((t) => t.id === colorTheme) || COLOR_THEMES[0];
             return (
               <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 32 }}>
                 <Top title="Profil" onBack={back} />
@@ -1786,6 +1788,18 @@ jobs:
                         );
                       })}
                     </View>
+                    <Text style={{ color: C.mute, fontSize: 13, marginTop: 14, marginBottom: 8 }}>
+                      Warna Tema:
+                    </Text>
+                    <Select
+                      value={activeColorObj.label}
+                      placeholder="Pilih Warna Tema"
+                      options={COLOR_THEMES.map((t) => t.label)}
+                      onPick={(pickedLbl) => {
+                        const found = COLOR_THEMES.find((t) => t.label === pickedLbl);
+                        if (found && changeColorTheme) changeColorTheme(found.id);
+                      }}
+                    />
                   </Card>
                   <Card title="Kemas Kini & Versi" icon="🔄" tint={C.navy}>
                     <Row icon="📱" k="Versi Semasa" v={`v${Application.nativeApplicationVersion || '1.1.0'} (Build #${Application.nativeBuildVersion || '1'})`} tint={C.primary} />
@@ -1837,7 +1851,9 @@ jobs:
             const need = () => (sess.staff_id ? '' : 'ID staff belum dimuatkan. Kembali ke Dashboard dan tunggu data dimuat.');
             
             const onQr = async ({ data }) => {
-              if (done) return; if (need()) return setErr(need()); setDone(true); setBusy(true); setErr('');
+              if (done) return; if (need()) return setErr(need());
+              Vibration.vibrate(80);
+              setDone(true); setBusy(true); setErr('');
               try {
                 const lat = useLoc ? loc.fix?.latitude : undefined;
                 const lng = useLoc ? loc.fix?.longitude : undefined;
@@ -1860,6 +1876,7 @@ jobs:
                     const r = await call(EP.qr, { ...base, method: 'qr', qr_code: scanned[0].data, latitude: lat, longitude: lng });
                     await addLocalTag('qr');
                     await saveTagDetails('qr', lat, lng);
+                    Vibration.vibrate(80);
                     setOk(typeof r === 'string' ? r : 'Muat naik QR berjaya.');
                   } else {
                     setErr('Kod QR tidak dikesan dalam gambar.'); setDone(false);
@@ -1988,6 +2005,7 @@ jobs:
           export default function App() {
             const systemScheme = useColorScheme() === 'dark' ? 'dark' : 'light';
             const [themeMode, setThemeMode] = useState('system');
+            const [colorTheme, setColorTheme] = useState('terracotta');
             const [updateModal, setUpdateModal] = useState(null);
             const [checkingUpdate, setCheckingUpdate] = useState(false);
             useEffect(() => {
@@ -1996,10 +2014,20 @@ jobs:
                   setThemeMode(saved);
                 }
               }).catch(() => {});
+              SecureStore.getItemAsync('APP_COLOR_THEME').then((savedColor) => {
+                if (savedColor && COLOR_THEMES.some((t) => t.id === savedColor)) {
+                  setColorTheme(savedColor);
+                }
+              }).catch(() => {});
             }, []);
             const changeTheme = async (mode) => {
               setThemeMode(mode);
               await SecureStore.setItemAsync('APP_THEME_MODE', mode);
+            };
+            const changeColorTheme = async (id) => {
+              setColorTheme(id);
+              Vibration.vibrate(35);
+              await SecureStore.setItemAsync('APP_COLOR_THEME', id);
             };
             const checkForUpdate = useCallback(async (manual = false) => {
               setCheckingUpdate(true);
@@ -2043,8 +2071,8 @@ jobs:
               checkForUpdate(false);
             }, [checkForUpdate]);
             const activeScheme = themeMode === 'system' ? systemScheme : themeMode;
-            const C = themes[activeScheme] || themes.light;
-            const s = useMemo(() => makeStyles(C), [activeScheme]);
+            const C = useMemo(() => buildTheme(activeScheme, colorTheme), [activeScheme, colorTheme]);
+            const s = useMemo(() => makeStyles(C), [C]);
             const [sess, setSess] = useState(undefined); const [view, setView] = useState('home');
             const [logoutData, setLogoutData] = useState(null);
             useEffect(() => {
@@ -2077,7 +2105,7 @@ jobs:
             else body = <Dashboard sess={sess} go={setView} onSess={setSess} onLogout={(oldSess) => { setLogoutData(oldSess); setSess(null); }} />;
             
             return (
-              <ThemeCtx.Provider value={{ C, s, scheme: activeScheme, themeMode, changeTheme }}>
+              <ThemeCtx.Provider value={{ C, s, scheme: activeScheme, themeMode, changeTheme, colorTheme, changeColorTheme }}>
                 <SafeAreaView style={s.root}>
                   <StatusBar style={activeScheme === 'dark' ? 'light' : 'dark'} backgroundColor={C.bg} />
                   {Platform.OS === 'android' ? <View style={{ height: RNBar.currentHeight || 0, backgroundColor: C.bg }} /> : null}
@@ -2414,6 +2442,39 @@ jobs:
           export const peek = (r) => { try { return JSON.stringify(r).replace(/\s+/g, ' ').slice(0, 300); } catch (_) { return String(r).slice(0, 300); } };
           IHR_EOF
           cat > 'src/theme.js' <<'IHR_EOF'
+          export const COLOR_THEMES = [
+            {
+              id: 'terracotta',
+              label: '🔴 Merah Bata (Default)',
+              light: { primary: '#BC4A32', primaryText: '#BC4A32', primarySoft: '#F6E4DF', navy: '#1F2D55' },
+              dark:  { primary: '#C4513A', primaryText: '#FF8F75', primarySoft: '#3A2420', navy: '#A9BBEA' },
+            },
+            {
+              id: 'blue',
+              label: '🔵 Biru Diraja (Blue)',
+              light: { primary: '#1D4ED8', primaryText: '#1D4ED8', primarySoft: '#DBEAFE', navy: '#1E3A8A' },
+              dark:  { primary: '#3B82F6', primaryText: '#93C5FD', primarySoft: '#1E293B', navy: '#93C5FD' },
+            },
+            {
+              id: 'green',
+              label: '🟢 Hijau Hutan (Green)',
+              light: { primary: '#15803D', primaryText: '#15803D', primarySoft: '#DCFCE7', navy: '#14532D' },
+              dark:  { primary: '#22C55E', primaryText: '#86EFAC', primarySoft: '#142E20', navy: '#86EFAC' },
+            },
+            {
+              id: 'wood',
+              label: '🪵 Kayu Jati (Wood)',
+              light: { primary: '#78350F', primaryText: '#78350F', primarySoft: '#FEF3C7', navy: '#451A03' },
+              dark:  { primary: '#B45309', primaryText: '#FCD34D', primarySoft: '#332211', navy: '#FDE68A' },
+            },
+            {
+              id: 'purple',
+              label: '🟣 Ungu Diraja (Purple)',
+              light: { primary: '#6D28D9', primaryText: '#6D28D9', primarySoft: '#EDE9FE', navy: '#4C1D95' },
+              dark:  { primary: '#8B5CF6', primaryText: '#C4B5FD', primarySoft: '#2E1E47', navy: '#DDD6FE' },
+            },
+          ];
+
           export const light = {
             bg: '#EEEDEE', card: '#FFFFFF', line: '#D9D5D7', ink: '#14141A', mute: '#6B6B75', field: '#FAF9FA',
             primary: '#BC4A32', primaryText: '#BC4A32', primarySoft: '#F6E4DF', onPrimary: '#FFFFFF',
@@ -2427,6 +2488,13 @@ jobs:
             ok: '#7FD6A0', okBg: '#16301F', okLine: '#2C5A40', bad: '#FFB4AB', badBg: '#3C1F1D', badLine: '#6B2E2A',
           };
           export const themes = { light, dark };
+
+          export function buildTheme(scheme = 'light', colorId = 'terracotta') {
+            const base = scheme === 'dark' ? dark : light;
+            const found = COLOR_THEMES.find((t) => t.id === colorId) || COLOR_THEMES[0];
+            const palette = scheme === 'dark' ? found.dark : found.light;
+            return { ...base, ...palette };
+          }
           IHR_EOF
           ls -R . | head -20
       - uses: actions/setup-node@v4
@@ -2484,7 +2552,7 @@ jobs:
         with:
           tag_name: "v1.1.0-${{ github.run_number }}"
           name: "iHR APK Build v1.1.0 #${{ github.run_number }}"
-          body: "Update Patch: new patch"
+          body: "Update Patch: Warna Tema Dropdown (Merah Bata, Biru Diraja, Hijau Hutan, Kayu Jati, Ungu Diraja), QR Scan Vibration, Pull-to-Refresh, and Dynamic Year Filter."
           draft: false
           prerelease: false
           files: app/android/app/build/outputs/apk/release/*.apk
