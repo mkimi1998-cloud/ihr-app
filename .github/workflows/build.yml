@@ -2270,10 +2270,10 @@ jobs:
                       </Text>
                       <Text style={{ fontSize: 12, color: C.ink, marginTop: 3 }}>
                         • Waktu Masuk: 7:30 PG – 9:00 PG{'
-'}
+                      '}
                         • Waktu Keluar: 4:30 PTG – 6:00 PTG
                         {todayTargetTxt ? `
-• Sasaran Hari Ini (Pelayan): ${todayTargetTxt}` : ''}
+                        • Sasaran Hari Ini (Pelayan): ${todayTargetTxt}` : ''}
                       </Text>
                     </View>
                     {wbfEnabled ? (
