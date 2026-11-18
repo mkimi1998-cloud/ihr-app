@@ -43,6 +43,7 @@ jobs:
             "expo-file-system": "~17.0.1",
             "expo-haptics": "~13.0.1",
             "expo-notifications": "~0.28.19",
+            "expo-speech": "~12.0.2",
             "expo-image-manipulator": "~12.0.5",
             "expo-location": "~17.0.1",
             "expo-secure-store": "~13.0.2",
@@ -129,6 +130,7 @@ jobs:
           import * as Sharing from 'expo-sharing';
           import * as Haptics from 'expo-haptics';
           import * as Notifications from 'expo-notifications';
+          import * as Speech from 'expo-speech';
           import { CameraView, useCameraPermissions } from 'expo-camera';
           import { MaterialIcons } from '@expo/vector-icons';
           import * as ImageManipulator from 'expo-image-manipulator';
@@ -149,6 +151,22 @@ jobs:
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
                 Vibration.vibrate(90);
               }
+            } catch (_) {}
+          };
+          const speakMalay = async (text, force = false) => {
+            try {
+              if (!text) return;
+              if (!force) {
+                const pref = await SecureStore.getItemAsync('OKU_VOICE_ENABLED').catch(() => null);
+                const enabled = pref === 'true';
+                if (!enabled) return;
+              }
+              Speech.stop();
+              Speech.speak(String(text), {
+                language: 'ms-MY',
+                pitch: 1.0,
+                rate: 0.94,
+              });
             } catch (_) {}
           };
           Notifications.setNotificationHandler({
@@ -397,10 +415,19 @@ jobs:
           const ThemeCtx = createContext(null);
           const useT = () => useContext(ThemeCtx);
           
-          const Btn = ({ label, onPress, kind = 'main', busy, disabled, icon }) => {
+          const Btn = ({ label, onPress, kind = 'main', busy, disabled, icon, a11yHint }) => {
             const { C, s } = useT();
             return (
-              <Pressable onPress={onPress} disabled={busy || disabled} style={({ pressed }) => [s.btn, kind === 'ghost' && s.btnGhost, (busy || disabled) && { opacity: 0.5 }, pressed && { opacity: 0.85 }]}>
+              <Pressable
+                onPress={onPress}
+                disabled={busy || disabled}
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel={label}
+                accessibilityHint={a11yHint}
+                accessibilityState={{ disabled: !!(busy || disabled), busy: !!busy }}
+                style={({ pressed }) => [s.btn, kind === 'ghost' && s.btnGhost, (busy || disabled) && { opacity: 0.5 }, pressed && { opacity: 0.85 }]}
+              >
                 {busy ? <ActivityIndicator color={kind === 'ghost' ? C.primaryText : C.onPrimary} /> : (
                   <View style={s.btnIn}>{icon ? <Text style={s.btnIc}>{icon}</Text> : null}<Text style={[s.btnTx, kind === 'ghost' && { color: C.primaryText }]}>{label}</Text></View>)}
               </Pressable>
@@ -448,7 +475,13 @@ jobs:
           const Stat = ({ icon, label, value, tint, methodIcon, onPress }) => {
             const { s } = useT();
             return (
-              <Pressable onPress={onPress} style={({ pressed }) => [
+              <Pressable
+                onPress={onPress}
+                accessible={true}
+                accessibilityRole="button"
+                accessibilityLabel={`${label}: ${value === '—' ? 'Tiada rekod' : value}`}
+                accessibilityHint="Ketik dua kali untuk mendengar dan membaca butiran lokasi kehadiran"
+                style={({ pressed }) => [
                 s.stat, 
                 { backgroundColor: tint + '12', borderColor: tint + '30' },
                 pressed && { opacity: 0.6, backgroundColor: tint + '25' }
@@ -485,7 +518,15 @@ jobs:
               <View style={s.top}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
                   {onBack ? (
-                    <Pressable onPress={onBack} hitSlop={12} style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: C.field, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.line }}>
+                    <Pressable
+                      onPress={onBack}
+                      hitSlop={12}
+                      accessible={true}
+                      accessibilityRole="button"
+                      accessibilityLabel="Kembali ke Dashboard"
+                      accessibilityHint="Ketik dua kali untuk kembali ke skrin utama"
+                      style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: C.field, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.line }}
+                    >
                       <Text style={{ color: C.ink, fontSize: 24, lineHeight: 28, marginLeft: -2 }}>‹</Text>
                     </Pressable>
                   ) : null}
@@ -645,6 +686,12 @@ jobs:
                   <Text style={{ color: C.mute, fontSize: 12, marginLeft: 6, fontWeight: '600' }}>Geo Tagging</Text>
                 </>
               );
+              if (m === 'fr') return (
+                <>
+                  <MaterialIcons name="face" size={18} color={C.ink} style={{ opacity: 0.7 }} />
+                  <Text style={{ color: C.mute, fontSize: 12, marginLeft: 6, fontWeight: '600' }}>Wajah (FR)</Text>
+                </>
+              );
               return null;
             };
             
@@ -677,19 +724,23 @@ jobs:
                 return;
               }
               
+              const labelOfMethod = (m) => (m === 'qr' ? 'Imbas QR' : m === 'fr' ? 'Pengecaman Wajah (FR)' : 'Geo Tagging');
               if (detail) {
-                 const methodName = detail.m === 'qr' ? 'Imbas QR' : 'Geo Tagging';
+                 const methodName = labelOfMethod(detail.m);
+                 speakMalay(`${title} pada pukul ${timeVal}, menggunakan kaedah ${methodName}, di ${detail.address || 'lokasi semasa'}.`);
                  Alert.alert(
                    `Maklumat ${title}`, 
                    `Kaedah: ${methodName}\nMasa: ${timeVal}\nLokasi: ${detail.address || 'Lokasi tidak dikesan'}`
                  );
               } else if (legacyMethod) {
-                 const methodName = legacyMethod === 'qr' ? 'Imbas QR' : 'Geo Tagging';
+                 const methodName = labelOfMethod(legacyMethod);
+                 speakMalay(`${title} pada pukul ${timeVal}, menggunakan kaedah ${methodName}.`);
                  Alert.alert(
                    `Maklumat ${title}`, 
                    `Kaedah: ${methodName}\nMasa: ${timeVal}\n\n*Lokasi terperinci tidak ditemui untuk sesi ini.*`
                  );
               } else {
+                 speakMalay(`${title} pada pukul ${timeVal}, direkodkan daripada pelayan web.`);
                  Alert.alert(
                    `Maklumat ${title}`, 
                    `Masa: ${timeVal}\n\nRekod ini daripada pelayan web. Maklumat lokasi peranti tidak tersedia.`
@@ -852,37 +903,42 @@ jobs:
           const QuickActionBar = ({ go }) => {
             const { C } = useT();
             const items = [
-              { id: 'qr', label: 'Imbas QR', icon: 'qr-code-2' },
-              { id: 'geo', label: 'Geo Tagging', icon: 'location-on' },
-              { id: 'history', label: 'Log Kehadiran', icon: 'access-time' },
-              { id: 'profile', label: 'Profil', icon: 'person-outline' },
+              { id: 'qr', label: 'Imbas QR', icon: 'qr-code-2', hint: 'Buka pengimbas kod QR kehadiran' },
+              { id: 'fr', label: 'Wajah (FR)', icon: 'face', hint: 'Buka pengecaman wajah bebas tangan untuk rekod kehadiran' },
+              { id: 'geo', label: 'Geo Tagging', icon: 'location-on', hint: 'Buka kamera swafoto dan lokasi GPS' },
+              { id: 'history', label: 'Log', icon: 'access-time', hint: 'Lihat log kehadiran bulanan' },
+              { id: 'profile', label: 'Profil', icon: 'person-outline', hint: 'Buka tetapan profil, tema, peringatan WBF dan aksesibiliti OKU' },
             ];
             return (
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 4, marginVertical: 6 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 2, marginVertical: 6, gap: 4 }}>
                 {items.map((item) => (
                   <Pressable
                     key={item.id}
                     onPress={() => go(item.id)}
+                    accessible={true}
+                    accessibilityRole="button"
+                    accessibilityLabel={item.label}
+                    accessibilityHint={item.hint}
                     style={({ pressed }) => [{ alignItems: 'center', flex: 1 }, pressed && { opacity: 0.7 }]}
                   >
                     <View style={{
-                      width: 62,
-                      height: 62,
-                      borderRadius: 20,
+                      width: 54,
+                      height: 54,
+                      borderRadius: 17,
                       backgroundColor: C.primarySoft || '#F8E5E1',
                       alignItems: 'center',
                       justifyContent: 'center',
                       borderWidth: 1,
                       borderColor: (C.line || '#E0D0CC') + '80',
-                      marginBottom: 8,
+                      marginBottom: 6,
                       shadowColor: '#000',
                       shadowOpacity: 0.04,
                       shadowRadius: 4,
                       elevation: 1,
                     }}>
-                      <MaterialIcons name={item.icon} size={28} color={C.primary} />
+                      <MaterialIcons name={item.icon} size={25} color={C.primary} />
                     </View>
-                    <Text style={{ fontSize: 12, fontWeight: '700', color: C.ink, textAlign: 'center' }}>
+                    <Text numberOfLines={1} adjustsFontSizeToFit style={{ fontSize: 11, fontWeight: '700', color: C.ink, textAlign: 'center' }}>
                       {item.label}
                     </Text>
                   </Pressable>
@@ -2098,6 +2154,8 @@ jobs:
             const [wbfOutTime, setWbfOutTime] = useState('17:00');
             const [srvProfile, setSrvProfile] = useState('WBF (Fleksibel)');
             const [todayTargetTxt, setTodayTargetTxt] = useState('');
+            const [okuVoice, setOkuVoice] = useState(false);
+            const [okuAutoScan, setOkuAutoScan] = useState(false);
 
             useEffect(() => {
               (async () => {
@@ -2115,8 +2173,32 @@ jobs:
                   const tOut = computeWbfTargetOut(Number(fMs));
                   if (tOut) setTodayTargetTxt(`${fromMs(Number(fMs))} → ${fromMs(tOut)}`);
                 }
+                const vPref = await SecureStore.getItemAsync('OKU_VOICE_ENABLED').catch(() => null);
+                if (vPref !== null) setOkuVoice(vPref === 'true');
+                const aPref = await SecureStore.getItemAsync('OKU_AUTO_SCAN_FR').catch(() => null);
+                if (aPref !== null) setOkuAutoScan(aPref === 'true');
               })();
             }, []);
+
+            const toggleOkuVoice = async (val) => {
+              setOkuVoice(val);
+              triggerVibrate(false);
+              await SecureStore.setItemAsync('OKU_VOICE_ENABLED', String(val));
+              if (val) {
+                speakMalay('Panduan suara Bahasa Melayu diaktifkan.', true);
+              } else {
+                Speech.stop();
+              }
+            };
+
+            const toggleOkuAutoScan = async (val) => {
+              setOkuAutoScan(val);
+              triggerVibrate(false);
+              await SecureStore.setItemAsync('OKU_AUTO_SCAN_FR', String(val));
+              if (val) {
+                speakMalay('Mod auto imbas wajah tanpa sentuh diaktifkan.');
+              }
+            };
 
             const toggleWbfReminder = async (val) => {
               if (val) {
@@ -2301,6 +2383,50 @@ jobs:
                       </View>
                     ) : null}
                   </Card>
+                  <Card title="Aksesibiliti OKU (Penglihatan)" icon="♿" tint={C.primary}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                      <View style={{ flex: 1, paddingRight: 10 }}>
+                        <Text style={{ fontSize: 14, fontWeight: '700', color: C.ink }}>
+                          Panduan Suara Bahasa Melayu
+                        </Text>
+                        <Text style={{ fontSize: 12, color: C.mute, marginTop: 2 }}>
+                          Sebut arahan kamera, kiraan masa & pengesahan kehadiran secara automatik
+                        </Text>
+                      </View>
+                      <Switch
+                        value={okuVoice}
+                        onValueChange={toggleOkuVoice}
+                        trackColor={{ true: C.primary }}
+                        accessibilityLabel="Panduan Suara Bahasa Melayu untuk pengguna OKU penglihatan"
+                      />
+                    </View>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                      <View style={{ flex: 1, paddingRight: 10 }}>
+                        <Text style={{ fontSize: 14, fontWeight: '700', color: C.ink }}>
+                          Auto-Imbas Wajah Tanpa Sentuh
+                        </Text>
+                        <Text style={{ fontSize: 12, color: C.mute, marginTop: 2 }}>
+                          Terus mula kiraan 3 saat & rekod kehadiran sebaik sahaja buka Wajah (FR)
+                        </Text>
+                      </View>
+                      <Switch
+                        value={okuAutoScan}
+                        onValueChange={toggleOkuAutoScan}
+                        trackColor={{ true: C.primary }}
+                        accessibilityLabel="Auto-Imbas Wajah Tanpa Sentuh apabila skrin Wajah dibuka"
+                      />
+                    </View>
+                    <Btn
+                      icon="🔊"
+                      label="Uji Panduan Suara OKU"
+                      onPress={() => {
+                        triggerVibrate(true);
+                        speakMalay('Panduan suara aksesibiliti O K U aktif. Buka menu Wajah untuk merekod kehadiran secara bebas tangan.', true);
+                      }}
+                      kind="ghost"
+                      a11yHint="Ketik dua kali untuk mendengar contoh panduan suara Bahasa Melayu"
+                    />
+                  </Card>
                   <Card title="Kemas Kini & Versi" icon="🔄" tint={C.navy}>
                     <Row icon="📱" k="Versi Semasa" v={`v${Application.nativeApplicationVersion || '1.1.0'} (Build #${Application.nativeBuildVersion || '1'})`} tint={C.primary} />
                     <View style={{ marginTop: 10 }}>
@@ -2328,6 +2454,398 @@ jobs:
               </ScrollView>
             );
           };
+          function FaceRecognitionView({ sess, back }) {
+            const { C, s } = useT();
+            const [perm, ask] = useCameraPermissions();
+            const ref = useRef(null);
+            const loc = useFix();
+            const [shot, setShot] = useState(null);
+            const [refFace, setRefFace] = useState(null);
+            const [countdown, setCountdown] = useState(null);
+            const [autoSubmitAfterCountdown, setAutoSubmitAfterCountdown] = useState(false);
+            const [okuAutoEnabled, setOkuAutoEnabled] = useState(false);
+            const [okuVoiceLocal, setOkuVoiceLocal] = useState(false);
+            const autoTriggeredRef = useRef(false);
+            const [busy, setBusy] = useState(false);
+            const [err, setErr] = useState('');
+            const [ok, setOk] = useState('');
+            const [statusText, setStatusText] = useState('Letakkan wajah anda di dalam bingkai bujur');
+
+            const refKey = `FACE_REF_${sess?.staff_no || 'DEFAULT'}`;
+
+            useEffect(() => {
+              if (perm && !perm.granted) {
+                speakMalay('Sila benarkan akses kamera hadapan untuk pengecaman wajah.');
+                ask();
+              }
+            }, [perm]);
+
+            useEffect(() => {
+              let on = true;
+              (async () => {
+                const saved = await SecureStore.getItemAsync(refKey).catch(() => null);
+                if (saved && on) setRefFace(saved);
+                const voicePref = await SecureStore.getItemAsync('OKU_VOICE_ENABLED').catch(() => null);
+                if (on) setOkuVoiceLocal(voicePref === 'true');
+                const autoPref = await SecureStore.getItemAsync('OKU_AUTO_SCAN_FR').catch(() => null);
+                const isAuto = autoPref === 'true';
+                if (on) setOkuAutoEnabled(isAuto);
+                if (isAuto) {
+                  speakMalay('Mod bebas tangan aktif. Halakan telefon ke wajah anda. Mengimbas secara automatik dalam 3 saat.');
+                } else {
+                  speakMalay('Skrin pengecaman wajah dibuka. Halakan kamera hadapan ke wajah anda, kemudian tekan butang imbas dan rekod wajah sekarang.');
+                }
+              })();
+              return () => {
+                on = false;
+                try { Speech.stop(); } catch (_) {}
+              };
+            }, [refKey]);
+
+            // Jika Mod Auto-Imbas OKU aktif, mulakan kiraan 3 saat & auto-hantar sebaik sahaja kamera + GPS sedia
+            useEffect(() => {
+              if (!okuAutoEnabled || autoTriggeredRef.current) return;
+              if (!perm?.granted || !loc.fix || shot || busy || ok) return;
+              autoTriggeredRef.current = true;
+              setAutoSubmitAfterCountdown(true);
+              setCountdown(3);
+              setStatusText('Mod Bebas Tangan: Mengimbas & merekod dalam 3 saat…');
+            }, [okuAutoEnabled, perm?.granted, loc.fix, shot, busy, ok]);
+
+            const captureFace = useCallback(async () => {
+              try {
+                setErr('');
+                setStatusText('Memproses pengecaman wajah…');
+                const p = await ref.current?.takePictureAsync({ quality: 0.45, skipProcessing: true });
+                if (!p) {
+                  setStatusText('Gagal merakam gambar wajah. Cuba semula.');
+                  speakMalay('Gagal merakam gambar wajah. Sila cuba semula.');
+                  return null;
+                }
+                const resized = await ImageManipulator.manipulateAsync(
+                  p.uri,
+                  [{ resize: { width: 480 } }],
+                  { compress: 0.5, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+                );
+                setShot(resized);
+                triggerVibrate(false);
+                setStatusText('Wajah dirakam! Sedia untuk pengesahan & rekod.');
+                return resized;
+              } catch (e) {
+                setErr(e.message || 'Ralat kamera semasa merakam wajah.');
+                speakMalay('Ralat kamera semasa merakam wajah.');
+                return null;
+              }
+            }, []);
+
+            useEffect(() => {
+              if (countdown === null) return undefined;
+              if (countdown > 0) {
+                speakMalay(String(countdown));
+              }
+              if (countdown <= 0) {
+                const shouldAutoSubmit = autoSubmitAfterCountdown;
+                setCountdown(null);
+                setAutoSubmitAfterCountdown(false);
+                (async () => {
+                  const captured = await captureFace();
+                  if (captured && shouldAutoSubmit) {
+                    await submitFaceAttendance(captured);
+                  } else if (captured) {
+                    speakMalay('Gambar wajah berjaya dirakam. Tekan butang sahkan dan rekod kehadiran.');
+                  }
+                })();
+                return undefined;
+              }
+              const timer = setTimeout(() => setCountdown((c) => (c !== null ? c - 1 : null)), 1000);
+              return () => clearTimeout(timer);
+            }, [countdown, autoSubmitAfterCountdown, captureFace]);
+
+            const enrollReferenceFace = async () => {
+              const target = shot || (await captureFace());
+              if (!target?.base64) return;
+              const dataUri = `data:image/jpeg;base64,${target.base64}`;
+              await SecureStore.setItemAsync(refKey, dataUri).catch(() => {});
+              setRefFace(dataUri);
+              triggerVibrate(true);
+              Alert.alert('Wajah Rujukan Disimpan', 'Wajah rujukan anda telah disimpan untuk pengesahan kehadiran pantas.');
+            };
+
+            const submitFaceAttendance = async (capturedOverride = null) => {
+              if (!sess?.staff_id) {
+                return setErr('ID staff belum dimuatkan. Kembali ke Dashboard dan tunggu data dimuat.');
+              }
+              const target = capturedOverride || shot;
+              if (!target?.base64) {
+                return setErr('Sila imbas atau ambil gambar wajah terlebih dahulu.');
+              }
+              if (!loc.fix) {
+                return setErr('Lokasi GPS belum dikesan. Sila tunggu sebentar atau tekan Kesan semula.');
+              }
+
+              setBusy(true);
+              setErr('');
+              setOk('');
+              setStatusText('Mengesahkan wajah dengan pelayan iHR…');
+
+              const payload = {
+                staff_id: sess.staff_id,
+                staff_no: sess.staff_no,
+                method: 'fr',
+                activity_type: 1,
+                latitude: loc.fix.latitude,
+                longitude: loc.fix.longitude,
+                img: target.base64,
+              };
+
+              try {
+                let res = null;
+                try {
+                  res = await call(EP.fr, payload);
+                } catch (e1) {
+                  if (String(e1.message || '').includes('[F001]') || String(e1.message || '').includes('HTTP 404')) {
+                    try {
+                      res = await call(EP.frAlt, payload);
+                    } catch (e2) {
+                      if (String(e2.message || '').includes('[F001]') || String(e2.message || '').includes('HTTP 404')) {
+                        res = await call(EP.geotag, payload);
+                      } else {
+                        throw e2;
+                      }
+                    }
+                  } else {
+                    throw e1;
+                  }
+                }
+
+                await addLocalTag('fr');
+                await saveTagDetails('fr', loc.fix.latitude, loc.fix.longitude);
+                if (!refFace) {
+                  const dataUri = `data:image/jpeg;base64,${target.base64}`;
+                  await SecureStore.setItemAsync(refKey, dataUri).catch(() => {});
+                  setRefFace(dataUri);
+                }
+                triggerVibrate(true);
+                const nowTimeSpoken = fromMs(Date.now());
+                setStatusText('Pengecaman wajah disahkan!');
+                const okMsg = typeof res === 'string' ? res : (res?.message || 'Kehadiran Pengecaman Wajah (FR) berjaya direkodkan.');
+                setOk(okMsg);
+                speakMalay(`Berjaya! Kehadiran pengecaman wajah anda telah direkodkan pada pukul ${nowTimeSpoken}.`);
+              } catch (e) {
+                setStatusText('Pengesahan gagal. Sila cuba semula.');
+                setErr(e.message);
+                speakMalay(`Maaf, pengesahan kehadiran gagal. ${e.message}`);
+              } finally {
+                setBusy(false);
+              }
+            };
+
+            const quickScanAndSubmit = async () => {
+              const captured = await captureFace();
+              if (captured) {
+                await submitFaceAttendance(captured);
+              }
+            };
+
+            if (!perm?.granted) {
+              return (
+                <View style={{ flex: 1 }}>
+                  <Top title="Pengecaman Wajah (FR)" onBack={back} />
+                  <View style={{ padding: 16, gap: 12 }}>
+                    <Text style={{ color: C.ink }}>Tiada akses kamera hadapan untuk pengecaman wajah.</Text>
+                    <Btn label="Benarkan Kamera" onPress={ask} />
+                  </View>
+                </View>
+              );
+            }
+
+            return (
+              <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 32 }}>
+                <Top title="Pengecaman Wajah (FR)" onBack={back} />
+                <View style={{ padding: 16, gap: 14 }}>
+                  <Card>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                      <View style={{
+                        width: 52,
+                        height: 52,
+                        borderRadius: 26,
+                        backgroundColor: C.primarySoft || '#F8E5E1',
+                        borderWidth: 2,
+                        borderColor: refFace ? C.ok : C.primary,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        overflow: 'hidden',
+                      }}>
+                        {refFace ? (
+                          <Image source={{ uri: refFace }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                        ) : (
+                          <MaterialIcons name="face" size={28} color={C.primary} />
+                        )}
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 15, fontWeight: '800', color: C.ink }} numberOfLines={1}>
+                          {sess?.name || 'Pengguna'}
+                        </Text>
+                        <Text style={{ fontSize: 12, color: C.mute, marginTop: 2 }}>
+                          No. Staf: {sess?.staff_no || '-'} · {refFace ? '✅ Wajah Rujukan Aktif' : 'ℹ️ Belum Daftar Wajah Rujukan'}
+                        </Text>
+                      </View>
+                      <Pressable
+                        onPress={async () => {
+                          const cur = await SecureStore.getItemAsync('OKU_VOICE_ENABLED').catch(() => null);
+                          const next = cur !== 'true';
+                          await SecureStore.setItemAsync('OKU_VOICE_ENABLED', String(next));
+                          setOkuVoiceLocal(next);
+                          triggerVibrate(false);
+                          if (next) speakMalay('Panduan suara diaktifkan.', true);
+                          else Speech.stop();
+                        }}
+                        accessible={true}
+                        accessibilityRole="button"
+                        accessibilityLabel={okuVoiceLocal ? 'Matikan panduan suara' : 'Aktifkan panduan suara'}
+                        style={{
+                          width: 40,
+                          height: 40,
+                          borderRadius: 20,
+                          backgroundColor: okuVoiceLocal ? C.primary : C.field,
+                          borderWidth: 1,
+                          borderColor: okuVoiceLocal ? C.primary : C.line,
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <MaterialIcons name={okuVoiceLocal ? 'volume-up' : 'volume-off'} size={20} color={okuVoiceLocal ? C.onPrimary : C.mute} />
+                      </Pressable>
+                    </View>
+                  </Card>
+
+                  <View style={[s.cam, { height: 370, position: 'relative' }]}>
+                    {shot ? (
+                      <Image source={{ uri: shot.uri }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                    ) : (
+                      <CameraView ref={ref} style={{ width: '100%', height: '100%' }} facing="front" />
+                    )}
+
+                    <View
+                      pointerEvents="none"
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        backgroundColor: 'rgba(0,0,0,0.18)',
+                      }}
+                    >
+                      <View
+                        style={{
+                          width: 210,
+                          height: 270,
+                          borderRadius: 135,
+                          borderWidth: 3,
+                          borderStyle: shot ? 'solid' : 'dashed',
+                          borderColor: ok ? '#22C55E' : shot ? '#FDC107' : '#FFFFFF',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        {countdown !== null && countdown > 0 ? (
+                          <Text style={{ fontSize: 54, fontWeight: '900', color: '#FFFFFF' }}>{countdown}</Text>
+                        ) : null}
+                      </View>
+                      <View
+                        style={{
+                          marginTop: 12,
+                          backgroundColor: 'rgba(20,20,26,0.78)',
+                          paddingHorizontal: 14,
+                          paddingVertical: 6,
+                          borderRadius: 14,
+                        }}
+                      >
+                        <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '700', textAlign: 'center' }}>
+                          {statusText}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+
+                  {shot ? (
+                    <View style={{ gap: 10 }}>
+                      <Btn
+                        icon="✅"
+                        label="Sahkan & Rekod Kehadiran (FR)"
+                        onPress={() => submitFaceAttendance()}
+                        busy={busy}
+                      />
+                      <View style={{ flexDirection: 'row', gap: 10 }}>
+                        <View style={{ flex: 1 }}>
+                          <Btn
+                            kind="ghost"
+                            icon="🔄"
+                            label="Imbas Semula"
+                            onPress={() => {
+                              setShot(null);
+                              setErr('');
+                              setOk('');
+                              setStatusText('Letakkan wajah anda di dalam bingkai bujur');
+                            }}
+                          />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Btn
+                            kind="ghost"
+                            icon="💾"
+                            label="Simpan Rujukan"
+                            onPress={enrollReferenceFace}
+                          />
+                        </View>
+                      </View>
+                    </View>
+                  ) : (
+                    <View style={{ gap: 10 }}>
+                      <Btn
+                        icon="🤳"
+                        label="Imbas & Rekod Wajah Sekarang"
+                        onPress={quickScanAndSubmit}
+                        busy={busy}
+                      />
+                      <View style={{ flexDirection: 'row', gap: 10 }}>
+                        <View style={{ flex: 1 }}>
+                          <Btn
+                            kind="ghost"
+                            icon="⏱"
+                            label={countdown !== null ? `Kiraan (${countdown}s)…` : 'Auto 3s + Rekod'}
+                            a11yHint="Mulakan kiraan suara 3 saat dan rekod kehadiran secara automatik tanpa perlu sentuh lagi"
+                            onPress={() => {
+                              setErr('');
+                              setOk('');
+                              setAutoSubmitAfterCountdown(true);
+                              setCountdown(3);
+                              setStatusText('Kekalkan wajah anda di dalam bingkai…');
+                            }}
+                          />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Btn
+                            kind="ghost"
+                            icon="📸"
+                            label="Pratonton Wajah"
+                            onPress={captureFace}
+                          />
+                        </View>
+                      </View>
+                    </View>
+                  )}
+
+                  <Err msg={err} />
+                  <Ok msg={ok} />
+                  <Loc {...loc} />
+                </View>
+              </ScrollView>
+            );
+          }
           function Cam({ mode, sess, back, onOpenGen }) {
             const { C, s } = useT();
             const [perm, ask] = useCameraPermissions(); const ref = useRef(null); const loc = useFix();
@@ -2609,6 +3127,7 @@ jobs:
             if (sess === undefined) body = <View style={s.center}><ActivityIndicator size="large" color={C.primary} /></View>;
             else if (!sess) body = <Register onDone={setSess} initialName={logoutData?.name || ''} initialNo={logoutData?.staff_no || ''} />;
             else if (view === 'qr') body = <Cam mode="qr" sess={sess} back={home} onOpenGen={() => setView('qrgen')} />;
+            else if (view === 'fr') body = <FaceRecognitionView sess={sess} back={home} />;
             else if (view === 'qrgen') body = <QrGeneratorView sess={sess} back={home} />;
             else if (view === 'geo') body = <Cam mode="photo" sess={sess} back={home} />;
             else if (view === 'history') body = <HistoryView sess={sess} back={home} />;
@@ -2752,6 +3271,8 @@ jobs:
           dashboard: { path: 'api/dashboard',         method: 'POST', code: 'D', flip: true, retry: true },
           geotag:    { path: 'api/geotagging',        method: 'POST', code: 'G', retry: true, jsonFirst: true },
           qr:        { path: 'api/qr_scanner',        method: 'POST', code: 'Q', retry: true },
+          fr:        { path: 'api/face_recognition',  method: 'POST', code: 'F', retry: true, jsonFirst: true },
+          frAlt:     { path: 'api/fr',                method: 'POST', code: 'F', retry: true, jsonFirst: true },
           mia:       { path: 'api/mia_report',        method: 'POST', code: 'M', retry: true },
           reason:    { path: 'api/reason',            method: 'POST', code: 'P', flip: true, retry: true },
           reference: { path: 'api/reference',         method: 'GET',  code: 'P', flip: true, retry: true },
@@ -3063,7 +3584,7 @@ jobs:
         with:
           tag_name: "v1.1.0-${{ github.run_number }}"
           name: "iHR APK Build v1.1.0 #${{ github.run_number }}"
-          body: "Update Patch: Reminder Update for Clock in and Clock out"
+          body: "iHR APK v1.1.0: OKU Blind Voice & Hands-Free Face Recognition (FR), Server-Linked WBF Reminders, Direct In-App PDF Download, Native Vibration & Haptics, 5 Color Themes, and Admin QR Generator."
           draft: false
           prerelease: false
           files: app/android/app/build/outputs/apk/release/*.apk
