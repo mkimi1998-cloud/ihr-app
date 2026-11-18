@@ -40,9 +40,13 @@ jobs:
             "expo": "~51.0.28",
             "expo-application": "~5.9.1",
             "expo-camera": "~15.0.16",
+            "expo-file-system": "~17.0.1",
+            "expo-haptics": "~13.0.1",
+            "expo-notifications": "~0.28.19",
             "expo-image-manipulator": "~12.0.5",
             "expo-location": "~17.0.1",
             "expo-secure-store": "~13.0.2",
+            "expo-sharing": "~12.0.1",
             "expo-status-bar": "~1.12.1",
             "expo-system-ui": "~3.0.7",
             "react": "18.2.0",
@@ -74,7 +78,11 @@ jobs:
                 "permissions": [
                   "android.permission.CAMERA",
                   "android.permission.ACCESS_COARSE_LOCATION",
-                  "android.permission.ACCESS_FINE_LOCATION"
+                  "android.permission.ACCESS_FINE_LOCATION",
+                  "android.permission.VIBRATE",
+                  "android.permission.POST_NOTIFICATIONS",
+                  "android.permission.RECEIVE_BOOT_COMPLETED",
+                  "android.permission.SCHEDULE_EXACT_ALARM"
                 ]
               },
               "plugins": [
@@ -91,6 +99,13 @@ jobs:
                   }
                 ],
                 "expo-secure-store",
+                [
+                  "expo-notifications",
+                  {
+                    "icon": "./assets/icon.png",
+                    "color": "#BC4A32"
+                  }
+                ],
                 [
                   "expo-image-picker",
                   {
@@ -110,6 +125,10 @@ jobs:
           import * as Location from 'expo-location';
           import * as Application from 'expo-application';
           import * as SecureStore from 'expo-secure-store';
+          import * as FileSystem from 'expo-file-system';
+          import * as Sharing from 'expo-sharing';
+          import * as Haptics from 'expo-haptics';
+          import * as Notifications from 'expo-notifications';
           import { CameraView, useCameraPermissions } from 'expo-camera';
           import { MaterialIcons } from '@expo/vector-icons';
           import * as ImageManipulator from 'expo-image-manipulator';
@@ -121,6 +140,173 @@ jobs:
           import { BASE_URL, EP, addLocalTag, call, clearSession, deviceId, findPhoto, getLocalTags, kerjaLuarFields, loadSession, parseReference, parseTabletLocations, peek, saveDeviceId, saveSession, unwrap } from './src/api';
           
           const GITHUB_REPO = 'mkimi1998-cloud/ihr-app';
+          const triggerVibrate = (strong = true) => {
+            try {
+              if (strong) {
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+                Vibration.vibrate([0, 140, 70, 140]);
+              } else {
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+                Vibration.vibrate(90);
+              }
+            } catch (_) {}
+          };
+          Notifications.setNotificationHandler({
+            handleNotification: async () => ({
+              shouldShowAlert: true,
+              shouldPlaySound: true,
+              shouldSetBadge: false,
+            }),
+          });
+
+          const WBF_IN_OPTIONS = [
+            { label: '07:30 AM (Awal WBF)', hour: 7, minute: 30 },
+            { label: '07:45 AM (Disyorkan)', hour: 7, minute: 45 },
+            { label: '08:00 AM', hour: 8, minute: 0 },
+            { label: '08:15 AM', hour: 8, minute: 15 },
+            { label: '08:30 AM', hour: 8, minute: 30 },
+            { label: '08:45 AM', hour: 8, minute: 45 },
+            { label: '08:55 AM (Akhir WBF)', hour: 8, minute: 55 },
+          ];
+          const WBF_OUT_OPTIONS = [
+            { label: '04:30 PM (Awal WBF)', hour: 16, minute: 30 },
+            { label: '04:45 PM', hour: 16, minute: 45 },
+            { label: '05:00 PM (Disyorkan)', hour: 17, minute: 0 },
+            { label: '05:15 PM', hour: 17, minute: 15 },
+            { label: '05:30 PM', hour: 17, minute: 30 },
+            { label: '05:45 PM', hour: 17, minute: 45 },
+            { label: '06:00 PM (Akhir WBF)', hour: 18, minute: 0 },
+          ];
+
+          // Kira sasaran waktu pulang WBF (9 jam bekerja dari waktu masuk, antara 4:30 PM - 6:00 PM)
+          const computeWbfTargetOut = (firstMs) => {
+            if (!firstMs) return null;
+            const dIn = new Date(firstMs);
+            const minIn = new Date(dIn.getFullYear(), dIn.getMonth(), dIn.getDate(), 7, 30, 0, 0).getTime();
+            const maxIn = new Date(dIn.getFullYear(), dIn.getMonth(), dIn.getDate(), 9, 0, 0, 0).getTime();
+            const effectiveIn = Math.min(Math.max(firstMs, minIn), maxIn);
+            const targetOutMs = effectiveIn + 9 * 60 * 60 * 1000;
+            const minOut = new Date(dIn.getFullYear(), dIn.getMonth(), dIn.getDate(), 16, 30, 0, 0).getTime();
+            const maxOut = new Date(dIn.getFullYear(), dIn.getMonth(), dIn.getDate(), 18, 0, 0, 0).getTime();
+            return Math.min(Math.max(targetOutMs, minOut), maxOut);
+          };
+
+          async function ensureNotificationChannel() {
+            if (Platform.OS === 'android') {
+              await Notifications.setNotificationChannelAsync('ihr-wbf-reminders', {
+                name: 'Peringatan Kehadiran WBF',
+                importance: Notifications.AndroidImportance.MAX,
+                vibrationPattern: [0, 220, 100, 220],
+                lightColor: '#BC4A32',
+                sound: 'default',
+              }).catch(() => {});
+            }
+          }
+
+          async function syncWbfReminders(opts = {}) {
+            try {
+              const enabledStr = opts.enabled !== undefined
+                ? String(opts.enabled)
+                : (await SecureStore.getItemAsync('WBF_REMINDER_ENABLED'));
+              const enabled = enabledStr === null ? true : enabledStr === 'true';
+
+              await Notifications.cancelAllScheduledNotificationsAsync().catch(() => {});
+              if (!enabled) return;
+
+              const perm = await Notifications.getPermissionsAsync();
+              if (perm.status !== 'granted') return;
+
+              await ensureNotificationChannel();
+
+              const inPref = opts.inTime || (await SecureStore.getItemAsync('WBF_IN_TIME')) || '07:45';
+              const outPref = opts.outTime || (await SecureStore.getItemAsync('WBF_OUT_TIME')) || '17:00';
+              const [inH, inM] = inPref.split(':').map((n) => parseInt(n, 10) || 0);
+              const [outH, outM] = outPref.split(':').map((n) => parseInt(n, 10) || 0);
+
+              const workProfile = opts.workProfile || (await SecureStore.getItemAsync('SERVER_WORK_PROFILE')) || 'WBF (Fleksibel)';
+              const today = todayStr();
+              const savedDate = await SecureStore.getItemAsync('WBF_TODAY_DATE');
+              const firstMsStr = opts.firstMs !== undefined
+                ? (opts.firstMs ? String(opts.firstMs) : '')
+                : (savedDate === today ? (await SecureStore.getItemAsync('WBF_TODAY_FIRST_MS')) : '');
+              const lastMsStr = opts.lastMs !== undefined
+                ? (opts.lastMs ? String(opts.lastMs) : '')
+                : (savedDate === today ? (await SecureStore.getItemAsync('WBF_TODAY_LAST_MS')) : '');
+
+              const firstMs = firstMsStr ? Number(firstMsStr) : null;
+              const lastMs = lastMsStr ? Number(lastMsStr) : null;
+              const now = new Date();
+              const hasClockedInToday = !!firstMs;
+              const hasClockedOutToday = !!(lastMs && firstMs && lastMs > firstMs && new Date(lastMs).getHours() >= 16);
+
+              // 1. Jadualkan peringatan Waktu Masuk (Isnin - Jumaat, 7:30 AM - 9:00 AM)
+              // Jika hari ini sudah clock-in, jadualkan bermula esok hari bekerja sahaja; jika belum, termasuk hari ini.
+              for (let weekday = 2; weekday <= 6; weekday++) {
+                const isTodayWeekday = (now.getDay() + 1) === weekday;
+                if (isTodayWeekday && hasClockedInToday) continue;
+                await Notifications.scheduleNotificationAsync({
+                  content: {
+                    title: '⏰ Peringatan Waktu Masuk (WBF)',
+                    body: `Sila imbas QR atau Geotagging masuk sekarang (Tempoh WBF: 7:30 PG – 9:00 PG · ${workProfile}).`,
+                    sound: 'default',
+                    data: { screen: 'qr' },
+                  },
+                  trigger: {
+                    weekday,
+                    hour: inH,
+                    minute: inM,
+                    repeats: true,
+                    channelId: 'ihr-wbf-reminders',
+                  },
+                });
+              }
+
+              // 2. Jadualkan peringatan Waktu Keluar (Isnin - Jumaat, 4:30 PM - 6:00 PM)
+              // Jika sudah clock-in hari ini, kira sasaran tepat 9 jam WBF dari waktu masuk pelayan!
+              const targetOutMs = computeWbfTargetOut(firstMs);
+              for (let weekday = 2; weekday <= 6; weekday++) {
+                const isTodayWeekday = (now.getDay() + 1) === weekday;
+                if (isTodayWeekday) {
+                  if (hasClockedOutToday) continue;
+                  if (targetOutMs && targetOutMs > Date.now()) {
+                    const targetDate = new Date(targetOutMs);
+                    const inLabel = fromMs(firstMs);
+                    const outLabel = fromMs(targetOutMs);
+                    await Notifications.scheduleNotificationAsync({
+                      content: {
+                        title: '🏁 Sasaran Waktu Pulang WBF Tercapai!',
+                        body: `Anda masuk pada ${inLabel}. Tempoh 9 jam ${workProfile} tamat pada ${outLabel} (4:30 PTG – 6:00 PTG). Sila imbas keluar.`,
+                        sound: 'default',
+                        data: { screen: 'qr' },
+                      },
+                      trigger: {
+                        date: targetDate,
+                        channelId: 'ihr-wbf-reminders',
+                      },
+                    });
+                    continue;
+                  }
+                }
+                await Notifications.scheduleNotificationAsync({
+                  content: {
+                    title: '🏁 Peringatan Waktu Keluar (WBF)',
+                    body: `Jangan lupa rekod kehadiran keluar anda sebelum tamat sesi (Tempoh WBF: 4:30 PTG – 6:00 PTG · ${workProfile}).`,
+                    sound: 'default',
+                    data: { screen: 'qr' },
+                  },
+                  trigger: {
+                    weekday,
+                    hour: outH,
+                    minute: outM,
+                    repeats: true,
+                    channelId: 'ihr-wbf-reminders',
+                  },
+                });
+              }
+            } catch (e) {
+              console.log('Ralat jadual notifikasi WBF:', e);
+            }
+          }
           const QR_GEN_ENDPOINT = 'generate_code';
           const MANUAL_LOC_LABEL = '✏️ Masukkan IMEI secara manual';
           const PRESET_TABLET_LOCATIONS = [
@@ -512,6 +698,28 @@ jobs:
             };
             
             const ring = data ? colorOf(data.att_color, C.accent) : C.accent;
+            const wbfTargetOutMs = computeWbfTargetOut(firstMs);
+            const wbfTargetOutStr = wbfTargetOutMs ? fromMs(wbfTargetOutMs) : null;
+            const wbfHasOut = !!(lastMs && firstMs && lastMs > firstMs && new Date(lastMs).getHours() >= 16);
+
+            useEffect(() => {
+              if (!data && tags.length === 0) return;
+              const td = todayStr();
+              (async () => {
+                await SecureStore.setItemAsync('WBF_TODAY_DATE', td).catch(() => {});
+                await SecureStore.setItemAsync('WBF_TODAY_FIRST_MS', firstMs ? String(firstMs) : '').catch(() => {});
+                await SecureStore.setItemAsync('WBF_TODAY_LAST_MS', lastMs ? String(lastMs) : '').catch(() => {});
+                const srvProf = data?.work_profile || data?.staff_data?.work_profile || data?.wbf_profile;
+                if (srvProf) {
+                  await SecureStore.setItemAsync('SERVER_WORK_PROFILE', String(srvProf)).catch(() => {});
+                }
+                await syncWbfReminders({
+                  firstMs: firstMs || null,
+                  lastMs: lastMs || null,
+                  workProfile: srvProf ? String(srvProf) : undefined,
+                });
+              })();
+            }, [data, firstMs, lastMs, tags.length]);
             
             return (
               <ScrollView contentContainerStyle={{ paddingBottom: 28 }} refreshControl={<RefreshControl refreshing={busy} onRefresh={load} colors={[C.primary]} tintColor={C.primary} />}>
@@ -569,6 +777,36 @@ jobs:
                   <View style={s.statRow}>
                     <Stat icon="📍" label="Waktu Masuk" value={first || '—'} tint={C.primary} methodIcon={firstM ? getMethodIcon(firstM) : null} onPress={() => showTagInfo('Waktu Masuk', true)} />
                     <Stat icon="📌" label="Waktu Keluar" value={last || '—'} tint={C.navy} methodIcon={lastM ? getMethodIcon(lastM) : null} onPress={() => showTagInfo('Waktu Keluar', false)} />
+                  </View>
+                  <View style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    backgroundColor: C.card,
+                    paddingHorizontal: 14,
+                    paddingVertical: 10,
+                    borderRadius: 14,
+                    borderWidth: 1,
+                    borderColor: C.line,
+                  }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                      <MaterialIcons name="schedule" size={18} color={C.primary} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: C.mute }}>
+                          WBF (7:30 PG – 9:00 PG · 4:30 PTG – 6:00 PTG)
+                        </Text>
+                        <Text style={{ fontSize: 12, fontWeight: '800', color: C.ink, marginTop: 1 }}>
+                          {wbfHasOut
+                            ? `Selesai hari ini (Keluar: ${last})`
+                            : wbfTargetOutStr
+                              ? `Sasaran Waktu Pulang: ${wbfTargetOutStr}`
+                              : 'Belum masuk (Sila imbas 7:30 – 9:00 PG)'}
+                        </Text>
+                      </View>
+                    </View>
+                    <Pressable onPress={() => go('profile')} hitSlop={8}>
+                      <MaterialIcons name="notifications-active" size={18} color={C.primary} />
+                    </Pressable>
                   </View>
                   <QuickActionBar go={go} />
                   
@@ -677,6 +915,7 @@ jobs:
             const [portalData, setPortalData] = useState(null);
             const [needPortalLogin, setNeedPortalLogin] = useState(false);
             const [webLoading, setWebLoading] = useState(true);
+            const [downloadingPdf, setDownloadingPdf] = useState(false);
             const [dayModal, setDayModal] = useState(null);
             const [actionMode, setActionMode] = useState(null);
             const [reasonType, setReasonType] = useState('2');
@@ -713,6 +952,34 @@ jobs:
             const onWebMessage = async (event) => {
               try {
                 const msg = JSON.parse(event.nativeEvent.data);
+                if (msg.type === 'PDF_ERROR') {
+                  setDownloadingPdf(false);
+                  Alert.alert('PDF Bulanan', msg.message || 'Gagal menjana fail PDF daripada pelayan.');
+                  return;
+                }
+                if (msg.type === 'PDF_DOWNLOADED' && msg.base64) {
+                  try {
+                    const safeName = `Rekod_Kehadiran_${monthNames[selMonth - 1]}_${selYear}.pdf`.replace(/[^a-zA-Z0-9._-]/g, '_');
+                    const fileUri = `${FileSystem.cacheDirectory}${safeName}`;
+                    await FileSystem.writeAsStringAsync(fileUri, msg.base64, {
+                      encoding: FileSystem.EncodingType.Base64,
+                    });
+                    setDownloadingPdf(false);
+                    if (await Sharing.isAvailableAsync()) {
+                      await Sharing.shareAsync(fileUri, {
+                        mimeType: 'application/pdf',
+                        dialogTitle: `Simpan / Buka ${safeName}`,
+                        UTI: 'com.adobe.pdf',
+                      });
+                    } else {
+                      Alert.alert('PDF Berjaya Dimuat Turun', `Fail disimpan di: ${fileUri}`);
+                    }
+                  } catch (fsErr) {
+                    setDownloadingPdf(false);
+                    Alert.alert('Ralat Simpan PDF', fsErr.message || 'Tidak dapat menyimpan fail PDF.');
+                  }
+                  return;
+                }
                 if (msg.type === 'LOGIN_REQUIRED') {
                   setNeedPortalLogin(true);
                   return;
@@ -721,6 +988,37 @@ jobs:
                   setNeedPortalLogin(false);
                   setPortalData(msg.payload);
                   await SecureStore.setItemAsync(cacheKey, JSON.stringify(msg.payload)).catch(() => {});
+                  if (msg.payload.workProfile) {
+                    await SecureStore.setItemAsync('SERVER_WORK_PROFILE', msg.payload.workProfile).catch(() => {});
+                  }
+                  if (Array.isArray(msg.payload.rows)) {
+                    const dNow = new Date();
+                    const todayPatterns = [
+                      `${dNow.getDate()}-${dNow.getMonth() + 1}-${dNow.getFullYear()}`,
+                      `${pad(dNow.getDate())}-${pad(dNow.getMonth() + 1)}-${dNow.getFullYear()}`,
+                      `${pad(dNow.getDate())}/${pad(dNow.getMonth() + 1)}/${dNow.getFullYear()}`,
+                    ];
+                    const todayRow = msg.payload.rows.find((r) => todayPatterns.includes(String(r.date || '').trim()));
+                    if (todayRow) {
+                      const parse12ToMs = (txt) => {
+                        const m = /(\d{1,2}):(\d{2})\s*(AM|PM)/i.exec(String(txt || ''));
+                        if (!m) return null;
+                        const dt = new Date();
+                        dt.setHours((+m[1] % 12) + (/pm/i.test(m[3]) ? 12 : 0), +m[2], 0, 0);
+                        return dt.getTime();
+                      };
+                      const pInMs = parse12ToMs(todayRow.clockIn);
+                      const pOutMs = parse12ToMs(todayRow.clockOut);
+                      await SecureStore.setItemAsync('WBF_TODAY_DATE', todayStr()).catch(() => {});
+                      if (pInMs) await SecureStore.setItemAsync('WBF_TODAY_FIRST_MS', String(pInMs)).catch(() => {});
+                      if (pOutMs) await SecureStore.setItemAsync('WBF_TODAY_LAST_MS', String(pOutMs)).catch(() => {});
+                      await syncWbfReminders({
+                        firstMs: pInMs || undefined,
+                        lastMs: pOutMs || undefined,
+                        workProfile: msg.payload.workProfile || undefined,
+                      });
+                    }
+                  }
                   if (Array.isArray(msg.payload.rows) && msg.payload.rows.length > 0) {
                     try {
                       const old = await SecureStore.getItemAsync('SYNCED_SERVER_ATTENDANCE');
@@ -1107,9 +1405,70 @@ jobs:
                         </Pressable>
 
                         <Pressable
+                          disabled={downloadingPdf}
                           onPress={() => {
-                            if (portalData?.pdfUrl) Linking.openURL(portalData.pdfUrl);
-                            else Alert.alert('PDF Bulanan', 'Sila tunggu data bulan dimuatkan dahulu sebelum menjana PDF.');
+                            if (!portalData && !webViewRef.current) {
+                              Alert.alert('PDF Bulanan', 'Sila tunggu data bulan dimuatkan dahulu sebelum menjana PDF.');
+                              return;
+                            }
+                            setDownloadingPdf(true);
+                            const pdfFetchJs = `
+                              (function() {
+                                try {
+                                  var pdfForm = document.querySelector('form[action*="pdf_attendance_monthly"]');
+                                  if (!pdfForm) {
+                                    window.ReactNativeWebView.postMessage(JSON.stringify({
+                                      type: 'PDF_ERROR',
+                                      message: 'Borang PDF tidak dijumpai. Pastikan rekod bulan telah dimuatkan atau log masuk di tab Portal Web.'
+                                    }));
+                                    return;
+                                  }
+                                  var act = pdfForm.getAttribute('action') || '';
+                                  var method = (pdfForm.getAttribute('method') || 'GET').toUpperCase();
+                                  var fd = new FormData(pdfForm);
+                                  var fetchUrl = act;
+                                  var opts = { method: method, credentials: 'include' };
+                                  if (method === 'GET') {
+                                    var params = new URLSearchParams();
+                                    fd.forEach(function(v, k) { params.append(k, v); });
+                                    fetchUrl = act + (act.indexOf('?') >= 0 ? '&' : '?') + params.toString();
+                                  } else {
+                                    var bodyParams = new URLSearchParams();
+                                    fd.forEach(function(v, k) { bodyParams.append(k, v); });
+                                    opts.headers = { 'Content-Type': 'application/x-www-form-urlencoded' };
+                                    opts.body = bodyParams.toString();
+                                  }
+                                  fetch(fetchUrl, opts)
+                                    .then(function(res) {
+                                      if (!res.ok) throw new Error('Pelayan memulangkan status HTTP ' + res.status);
+                                      return res.blob();
+                                    })
+                                    .then(function(blob) {
+                                      if (blob.type && blob.type.indexOf('html') >= 0) {
+                                        throw new Error('Sesi tamat tempoh. Sila log masuk sekali di tab Portal Web.');
+                                      }
+                                      var reader = new FileReader();
+                                      reader.onloadend = function() {
+                                        var dataUrl = reader.result || '';
+                                        var b64 = String(dataUrl).split(',')[1] || '';
+                                        if (!b64) {
+                                          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'PDF_ERROR', message: 'Kandungan PDF kosong.' }));
+                                          return;
+                                        }
+                                        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'PDF_DOWNLOADED', base64: b64 }));
+                                      };
+                                      reader.readAsDataURL(blob);
+                                    })
+                                    .catch(function(err) {
+                                      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'PDF_ERROR', message: err.message || 'Gagal memuat turun PDF.' }));
+                                    });
+                                } catch (e) {
+                                  window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'PDF_ERROR', message: e.message }));
+                                }
+                              })();
+                              true;
+                            `;
+                            webViewRef.current?.injectJavaScript(pdfFetchJs);
                           }}
                           style={{
                             flexDirection: 'row',
@@ -1121,10 +1480,17 @@ jobs:
                             borderWidth: 1,
                             borderColor: C.line,
                             gap: 4,
+                            opacity: downloadingPdf ? 0.6 : 1,
                           }}
                         >
-                          <MaterialIcons name="picture-as-pdf" size={18} color={C.primary} />
-                          <Text style={{ fontSize: 12, fontWeight: '800', color: C.primary }}>PDF</Text>
+                          {downloadingPdf ? (
+                            <ActivityIndicator size="small" color={C.primary} />
+                          ) : (
+                            <MaterialIcons name="picture-as-pdf" size={18} color={C.primary} />
+                          )}
+                          <Text style={{ fontSize: 12, fontWeight: '800', color: C.primary }}>
+                            {downloadingPdf ? '...' : 'PDF'}
+                          </Text>
                         </Pressable>
 
                         <Pressable
@@ -1637,7 +2003,7 @@ jobs:
                 });
                 await addLocalTag('qr');
                 await saveTagDetails('qr', lat, lng);
-                Vibration.vibrate(80);
+                triggerVibrate(true);
                 setOk(typeof r === 'string' ? r : (r?.message || `Kehadiran QR (${pickedLabel || 'Lokasi'}) berjaya direkodkan.`));
               } catch (e) {
                 setErr(e.message);
@@ -1727,6 +2093,87 @@ jobs:
               { id: 'system', label: 'Sistem', icon: 'settings-suggest' },
             ];
             const activeColorObj = COLOR_THEMES.find((t) => t.id === colorTheme) || COLOR_THEMES[0];
+            const [wbfEnabled, setWbfEnabled] = useState(true);
+            const [wbfInTime, setWbfInTime] = useState('07:45');
+            const [wbfOutTime, setWbfOutTime] = useState('17:00');
+            const [srvProfile, setSrvProfile] = useState('WBF (Fleksibel)');
+            const [todayTargetTxt, setTodayTargetTxt] = useState('');
+
+            useEffect(() => {
+              (async () => {
+                const en = await SecureStore.getItemAsync('WBF_REMINDER_ENABLED').catch(() => null);
+                if (en !== null) setWbfEnabled(en === 'true');
+                const inT = await SecureStore.getItemAsync('WBF_IN_TIME').catch(() => null);
+                if (inT) setWbfInTime(inT);
+                const outT = await SecureStore.getItemAsync('WBF_OUT_TIME').catch(() => null);
+                if (outT) setWbfOutTime(outT);
+                const prof = await SecureStore.getItemAsync('SERVER_WORK_PROFILE').catch(() => null);
+                if (prof) setSrvProfile(prof);
+                const sDate = await SecureStore.getItemAsync('WBF_TODAY_DATE').catch(() => null);
+                const fMs = await SecureStore.getItemAsync('WBF_TODAY_FIRST_MS').catch(() => null);
+                if (sDate === todayStr() && fMs) {
+                  const tOut = computeWbfTargetOut(Number(fMs));
+                  if (tOut) setTodayTargetTxt(`${fromMs(Number(fMs))} → ${fromMs(tOut)}`);
+                }
+              })();
+            }, []);
+
+            const toggleWbfReminder = async (val) => {
+              if (val) {
+                const { status } = await Notifications.requestPermissionsAsync();
+                if (status !== 'granted') {
+                  Alert.alert('Kebenaran Notifikasi', 'Sila benarkan notifikasi untuk aplikasi iHR dalam tetapan telefon anda.');
+                  return;
+                }
+              }
+              setWbfEnabled(val);
+              triggerVibrate(false);
+              await SecureStore.setItemAsync('WBF_REMINDER_ENABLED', String(val));
+              await syncWbfReminders({ enabled: val, inTime: wbfInTime, outTime: wbfOutTime });
+            };
+
+            const onPickWbfIn = async (lbl) => {
+              const found = WBF_IN_OPTIONS.find((x) => x.label === lbl);
+              if (!found) return;
+              const code = `${pad(found.hour)}:${pad(found.minute)}`;
+              setWbfInTime(code);
+              triggerVibrate(false);
+              await SecureStore.setItemAsync('WBF_IN_TIME', code);
+              await syncWbfReminders({ enabled: wbfEnabled, inTime: code, outTime: wbfOutTime });
+            };
+
+            const onPickWbfOut = async (lbl) => {
+              const found = WBF_OUT_OPTIONS.find((x) => x.label === lbl);
+              if (!found) return;
+              const code = `${pad(found.hour)}:${pad(found.minute)}`;
+              setWbfOutTime(code);
+              triggerVibrate(false);
+              await SecureStore.setItemAsync('WBF_OUT_TIME', code);
+              await syncWbfReminders({ enabled: wbfEnabled, inTime: wbfInTime, outTime: code });
+            };
+
+            const sendTestWbfNotification = async () => {
+              const { status } = await Notifications.requestPermissionsAsync();
+              if (status !== 'granted') {
+                Alert.alert('Kebenaran Notifikasi', 'Sila benarkan notifikasi dalam Tetapan Android/iOS terlebih dahulu.');
+                return;
+              }
+              await ensureNotificationChannel();
+              triggerVibrate(true);
+              await Notifications.scheduleNotificationAsync({
+                content: {
+                  title: `🔔 Ujian Peringatan ${srvProfile}`,
+                  body: todayTargetTxt
+                    ? `Rekod hari ini: ${todayTargetTxt} (Tempoh WBF: 7:30 PG – 9:00 PG & 4:30 PTG – 6:00 PTG).`
+                    : 'Peringatan WBF aktif! Waktu Masuk: 7:30 PG – 9:00 PG | Waktu Keluar: 4:30 PTG – 6:00 PTG.',
+                  sound: 'default',
+                },
+                trigger: null,
+              });
+            };
+
+            const pickedInLabel = (WBF_IN_OPTIONS.find((x) => `${pad(x.hour)}:${pad(x.minute)}` === wbfInTime) || WBF_IN_OPTIONS[1]).label;
+            const pickedOutLabel = (WBF_OUT_OPTIONS.find((x) => `${pad(x.hour)}:${pad(x.minute)}` === wbfOutTime) || WBF_OUT_OPTIONS[2]).label;
             return (
               <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 32 }}>
                 <Top title="Profil" onBack={back} />
@@ -1801,6 +2248,63 @@ jobs:
                       }}
                     />
                   </Card>
+                  <Card title="Peringatan Kehadiran (WBF)" icon="⏰" tint={C.primary}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                      <View style={{ flex: 1, paddingRight: 10 }}>
+                        <Text style={{ fontSize: 14, fontWeight: '700', color: C.ink }}>
+                          Notifikasi Masuk & Keluar
+                        </Text>
+                        <Text style={{ fontSize: 12, color: C.mute, marginTop: 2 }}>
+                          Profil Pelayan: {srvProfile} (Isnin – Jumaat)
+                        </Text>
+                      </View>
+                      <Switch
+                        value={wbfEnabled}
+                        onValueChange={toggleWbfReminder}
+                        trackColor={{ true: C.primary }}
+                      />
+                    </View>
+                    <View style={{ backgroundColor: C.field, padding: 10, borderRadius: 12, borderWidth: 1, borderColor: C.line, marginBottom: 12 }}>
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: C.primary }}>
+                        🕒 Jadual WBF Fleksibel (9 Jam Bekerja)
+                      </Text>
+                      <Text style={{ fontSize: 12, color: C.ink, marginTop: 3 }}>
+                        • Waktu Masuk: 7:30 PG – 9:00 PG{'
+'}
+                        • Waktu Keluar: 4:30 PTG – 6:00 PTG
+                        {todayTargetTxt ? `
+• Sasaran Hari Ini (Pelayan): ${todayTargetTxt}` : ''}
+                      </Text>
+                    </View>
+                    {wbfEnabled ? (
+                      <View style={{ gap: 10 }}>
+                        <View>
+                          <Text style={s.lbl}>Peringatan Waktu Masuk (7:30 – 9:00 PG):</Text>
+                          <Select
+                            value={pickedInLabel}
+                            placeholder="Pilih Masa Masuk"
+                            options={WBF_IN_OPTIONS.map((x) => x.label)}
+                            onPick={onPickWbfIn}
+                          />
+                        </View>
+                        <View>
+                          <Text style={s.lbl}>Peringatan Waktu Keluar (Auto ikut Masuk / 4:30 – 6:00 PTG):</Text>
+                          <Select
+                            value={pickedOutLabel}
+                            placeholder="Pilih Masa Keluar"
+                            options={WBF_OUT_OPTIONS.map((x) => x.label)}
+                            onPick={onPickWbfOut}
+                          />
+                        </View>
+                        <Btn
+                          icon="🔔"
+                          label="Uji Notifikasi Sekarang"
+                          onPress={sendTestWbfNotification}
+                          kind="ghost"
+                        />
+                      </View>
+                    ) : null}
+                  </Card>
                   <Card title="Kemas Kini & Versi" icon="🔄" tint={C.navy}>
                     <Row icon="📱" k="Versi Semasa" v={`v${Application.nativeApplicationVersion || '1.1.0'} (Build #${Application.nativeBuildVersion || '1'})`} tint={C.primary} />
                     <View style={{ marginTop: 10 }}>
@@ -1852,7 +2356,7 @@ jobs:
             
             const onQr = async ({ data }) => {
               if (done) return; if (need()) return setErr(need());
-              Vibration.vibrate(80);
+              triggerVibrate(true);
               setDone(true); setBusy(true); setErr('');
               try {
                 const lat = useLoc ? loc.fix?.latitude : undefined;
@@ -1876,7 +2380,7 @@ jobs:
                     const r = await call(EP.qr, { ...base, method: 'qr', qr_code: scanned[0].data, latitude: lat, longitude: lng });
                     await addLocalTag('qr');
                     await saveTagDetails('qr', lat, lng);
-                    Vibration.vibrate(80);
+                    triggerVibrate(true);
                     setOk(typeof r === 'string' ? r : 'Muat naik QR berjaya.');
                   } else {
                     setErr('Kod QR tidak dikesan dalam gambar.'); setDone(false);
@@ -1922,6 +2426,7 @@ jobs:
                     const r = await call(EP.geotag, payload); 
                     await addLocalTag('geo'); 
                     await saveTagDetails('geo', loc.fix.latitude, loc.fix.longitude);
+                    triggerVibrate(true);
                     setOk(typeof r === 'string' ? r : 'Geotagging berjaya dihantar.'); 
                   } catch (e) { setErr(e.message); } finally { setBusy(false); }
                 } },
@@ -2022,11 +2527,12 @@ jobs:
             }, []);
             const changeTheme = async (mode) => {
               setThemeMode(mode);
+              triggerVibrate(false);
               await SecureStore.setItemAsync('APP_THEME_MODE', mode);
             };
             const changeColorTheme = async (id) => {
               setColorTheme(id);
-              Vibration.vibrate(35);
+              triggerVibrate(false);
               await SecureStore.setItemAsync('APP_COLOR_THEME', id);
             };
             const checkForUpdate = useCallback(async (manual = false) => {
@@ -2069,6 +2575,15 @@ jobs:
             }, []);
             useEffect(() => {
               checkForUpdate(false);
+              (async () => {
+                try {
+                  const { status } = await Notifications.getPermissionsAsync();
+                  if (status !== 'granted') {
+                    await Notifications.requestPermissionsAsync();
+                  }
+                  await syncWbfReminders();
+                } catch (_) {}
+              })();
             }, [checkForUpdate]);
             const activeScheme = themeMode === 'system' ? systemScheme : themeMode;
             const C = useMemo(() => buildTheme(activeScheme, colorTheme), [activeScheme, colorTheme]);
@@ -2234,6 +2749,10 @@ jobs:
           IHR_EOF
           cat > 'src/api.js' <<'IHR_EOF'
           import * as SecureStore from 'expo-secure-store';
+          import * as FileSystem from 'expo-file-system';
+          import * as Sharing from 'expo-sharing';
+          import * as Haptics from 'expo-haptics';
+          import * as Notifications from 'expo-notifications';
           import * as Application from 'expo-application';
           export const BASE_URL = 'https://ihr.mtib.gov.my/';
           export const EP = {
@@ -2552,7 +3071,7 @@ jobs:
         with:
           tag_name: "v1.1.0-${{ github.run_number }}"
           name: "iHR APK Build v1.1.0 #${{ github.run_number }}"
-          body: "Update Patch: Optimize Image Geotagging."
+          body: "Update Patch : Add On Reminder Clock In and Clock Out."
           draft: false
           prerelease: false
           files: app/android/app/build/outputs/apk/release/*.apk
