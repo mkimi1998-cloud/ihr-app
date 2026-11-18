@@ -1888,12 +1888,12 @@ jobs:
             };
             
             const snap = async () => { 
-              const p = await ref.current?.takePictureAsync({ quality: 0.4 }); 
+              const p = await ref.current?.takePictureAsync({ quality: 0.3, skipProcessing: true }); 
               if (p) {
                 const resized = await ImageManipulator.manipulateAsync(
                   p.uri,
-                  [{ resize: { width: 640 } }],
-                  { compress: 0.4, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+                  [{ resize: { width: 400 } }],
+                  { compress: 0.35, format: ImageManipulator.SaveFormat.JPEG, base64: true }
                 );
                 setShot(resized); 
               } 
@@ -2239,7 +2239,7 @@ jobs:
           export const EP = {
           register:  { path: 'api/user_registration', method: 'POST', code: 'R', retry: true },
           dashboard: { path: 'api/dashboard',         method: 'POST', code: 'D', flip: true, retry: true },
-          geotag:    { path: 'api/geotagging',        method: 'POST', code: 'G', retry: true },
+          geotag:    { path: 'api/geotagging',        method: 'POST', code: 'G', retry: true, jsonFirst: true },
           qr:        { path: 'api/qr_scanner',        method: 'POST', code: 'Q', retry: true },
           mia:       { path: 'api/mia_report',        method: 'POST', code: 'M', retry: true },
           reason:    { path: 'api/reason',            method: 'POST', code: 'P', flip: true, retry: true },
@@ -2274,7 +2274,7 @@ jobs:
             return { status: res.status, ok: res.ok, text: await res.text() };
           }
           export async function call(ep, body = {}) {
-            const kinds = ep.method === 'GET' || !ep.retry ? ['json'] : ['form', 'multipart', 'json'];
+            const kinds = ep.method === 'GET' || !ep.retry ? ['json'] : ep.jsonFirst ? ['json', 'form', 'multipart'] : ['form', 'multipart', 'json'];
             let last = { status: 0, text: '' };
             for (let i = 0; i < kinds.length; i++) {
               const kind = kinds[i];
@@ -2552,7 +2552,7 @@ jobs:
         with:
           tag_name: "v1.1.0-${{ github.run_number }}"
           name: "iHR APK Build v1.1.0 #${{ github.run_number }}"
-          body: "Update Patch: Warna Tema Dropdown (Merah Bata, Biru Diraja, Hijau Hutan, Kayu Jati, Ungu Diraja), QR Scan Vibration, Pull-to-Refresh, and Dynamic Year Filter."
+          body: "Update Patch: Optimize Image Geotagging."
           draft: false
           prerelease: false
           files: app/android/app/build/outputs/apk/release/*.apk
