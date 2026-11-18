@@ -3071,7 +3071,7 @@ jobs:
         with:
           tag_name: "v1.1.0-${{ github.run_number }}"
           name: "iHR APK Build v1.1.0 #${{ github.run_number }}"
-          body: "Update Patch : Add On Reminder Clock In and Clock Out."
+          body: "Update Patch: Warna Tema Dropdown (Merah Bata, Biru Diraja, Hijau Hutan, Kayu Jati, Ungu Diraja), QR Scan Vibration, Pull-to-Refresh, and Dynamic Year Filter."
           draft: false
           prerelease: false
           files: app/android/app/build/outputs/apk/release/*.apk
