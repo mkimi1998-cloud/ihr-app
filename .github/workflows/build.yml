@@ -2269,11 +2269,7 @@ jobs:
                         🕒 Jadual WBF Fleksibel (9 Jam Bekerja)
                       </Text>
                       <Text style={{ fontSize: 12, color: C.ink, marginTop: 3 }}>
-                        • Waktu Masuk: 7:30 PG – 9:00 PG{'
-                      '}
-                        • Waktu Keluar: 4:30 PTG – 6:00 PTG
-                        {todayTargetTxt ? `
-                        • Sasaran Hari Ini (Pelayan): ${todayTargetTxt}` : ''}
+                        {'• Waktu Masuk: 7:30 PG – 9:00 PG\n• Waktu Keluar: 4:30 PTG – 6:00 PTG' + (todayTargetTxt ? `\n• Sasaran Hari Ini (Pelayan): ${todayTargetTxt}` : '')}
                       </Text>
                     </View>
                     {wbfEnabled ? (
@@ -2749,10 +2745,6 @@ jobs:
           IHR_EOF
           cat > 'src/api.js' <<'IHR_EOF'
           import * as SecureStore from 'expo-secure-store';
-          import * as FileSystem from 'expo-file-system';
-          import * as Sharing from 'expo-sharing';
-          import * as Haptics from 'expo-haptics';
-          import * as Notifications from 'expo-notifications';
           import * as Application from 'expo-application';
           export const BASE_URL = 'https://ihr.mtib.gov.my/';
           export const EP = {
@@ -3071,7 +3063,7 @@ jobs:
         with:
           tag_name: "v1.1.0-${{ github.run_number }}"
           name: "iHR APK Build v1.1.0 #${{ github.run_number }}"
-          body: "Update Patch: Warna Tema Dropdown (Merah Bata, Biru Diraja, Hijau Hutan, Kayu Jati, Ungu Diraja), QR Scan Vibration, Pull-to-Refresh, and Dynamic Year Filter."
+          body: "Update Patch: Reminder Update for Clock in and Clock out"
           draft: false
           prerelease: false
           files: app/android/app/build/outputs/apk/release/*.apk
