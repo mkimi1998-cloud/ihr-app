@@ -3009,13 +3009,10 @@ jobs:
                 card_name: sess.name || '',
                 captured_time: capTime,
                 imei: savedTabletImei,
-                device_imei: savedTabletImei,
-                device_location: activeLoc,
                 latitude: liveLat,
                 longitude: liveLng,
                 type: 'fr',
                 method: 'fr',
-                attendance_type: 'fr',
                 img: target.base64,
                 face_image: target.base64,
               };
@@ -4182,7 +4179,7 @@ jobs:
         with:
           tag_name: "v1.1.0-${{ github.run_number }}"
           name: "iHR APK Build v1.1.0 #${{ github.run_number }}"
-          body: "iHR APK v1.1.0: OKU Blind Voice & Hands-Free Face Recognition (FR), Server-Linked WBF Reminders, Direct In-App PDF Download, Native Vibration & Haptics, 5 Color Themes, and Admin QR Generator."
+          body: "iHR APK v1.1.0: OKU Blind Voice & Hands-Free Face Recognition (FR), Server-Linked WBF Reminders, Direct In-App PDF Download, Native Vibration & Haptics, 5 Color Themes"
           draft: false
           prerelease: false
           files: app/android/app/build/outputs/apk/release/*.apk
