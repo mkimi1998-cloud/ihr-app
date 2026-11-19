@@ -3144,8 +3144,32 @@ jobs:
                 )}
                 {frUnlocked && (
                   <View style={{ padding: 16, gap: 10 }}>
-                    <Card title="Tetapan API Peranti FR (Admin)" icon="⚙️" tint={C.primary}>
-                      <Text style={s.lbl}>Laluan API FR Laravel (cth: api/device_data):</Text>
+                    <Card title="Tetapan Lanjutan FR (Admin)" icon="⚙️" tint={C.primary}>
+                      <Text style={s.lbl}>Mod Lokasi / Terminal Peranti FR:</Text>
+                      <Select
+                        value={selectedFrLabel}
+                        placeholder="Pilih Mod Lokasi FR"
+                        options={dropdownFrOptions}
+                        onPick={onPickFrDevice}
+                      />
+                      {selectedFrLabel === MANUAL_FR_DEVICE_LABEL ? (
+                        <>
+                          <Text style={[s.lbl, { marginTop: 8 }]}>IMEI Peranti FR (attendance_devices):</Text>
+                          <TextInput
+                            style={s.in}
+                            value={frTabletImei}
+                            onChangeText={async (v) => {
+                              setFrTabletImei(v);
+                              await SecureStore.setItemAsync('FR_TABLET_IMEI', v).catch(() => {});
+                            }}
+                            placeholder="Contoh: 772df402efe84b8293e95509af4b31e5"
+                            placeholderTextColor={C.mute}
+                            autoCapitalize="none"
+                            autoCorrect={false}
+                          />
+                        </>
+                      ) : null}
+                      <Text style={[s.lbl, { marginTop: 8 }]}>Laluan API FR Laravel (cth: api/device_data):</Text>
                       <TextInput
                         style={s.in}
                         value={customEpInput}
@@ -3158,12 +3182,12 @@ jobs:
                       <View style={{ marginTop: 10 }}>
                         <Btn
                           icon="💾"
-                          label="Simpan Laluan API FR"
+                          label="Simpan Tetapan Admin FR"
                           onPress={async () => {
                             if (customEpInput.trim()) await SecureStore.setItemAsync('FR_CUSTOM_ENDPOINT', customEpInput.trim());
                             else await SecureStore.deleteItemAsync('FR_CUSTOM_ENDPOINT');
                             triggerVibrate(true);
-                            Alert.alert('Disimpan', 'Laluan API Peranti FR telah disimpan.');
+                            Alert.alert('Disimpan', 'Tetapan admin FR telah disimpan.');
                           }}
                         />
                       </View>
@@ -3199,7 +3223,7 @@ jobs:
                           {sess?.name || 'Pengguna'}
                         </Text>
                         <Text style={{ fontSize: 11, color: C.mute, marginTop: 2 }}>
-                          ID Kad FR: {paddedCardNo} · {serverSynced ? '☁️ Segerak Pelayan' : '📱 Terminal Mudah Alih'}
+                          No. Staf: {sess?.staff_no || '-'} · {serverSynced ? '☁️ Wajah Disegerak' : '📱 Sedia Imbas'}
                         </Text>
                       </View>
                       <Pressable
@@ -3253,67 +3277,19 @@ jobs:
                       </Pressable>
                     </View>
 
-                    <View style={{ marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: C.line }}>
-                      <Pressable
-                        onPress={() => setShowDevicePicker(!showDevicePicker)}
-                        style={{
-                          flexDirection: 'row',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          backgroundColor: C.field,
-                          paddingHorizontal: 12,
-                          paddingVertical: 10,
-                          borderRadius: 12,
-                          borderWidth: 1,
-                          borderColor: C.line,
-                        }}
-                      >
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
-                          <MaterialIcons name="tablet-android" size={18} color={C.primary} />
-                          <View style={{ flex: 1 }}>
-                            <Text style={{ fontSize: 10, fontWeight: '700', color: C.mute, textTransform: 'uppercase' }}>
-                              Mod Terminal Peranti FR
-                            </Text>
-                            <Text style={{ fontSize: 13, fontWeight: '800', color: C.ink }} numberOfLines={1}>
-                              {activeLocDisplay}
-                            </Text>
-                          </View>
-                        </View>
-                        <Text style={{ color: C.mute, fontSize: 12, marginLeft: 6 }}>{showDevicePicker ? '▲' : '▼'}</Text>
-                      </Pressable>
-
-                      {showDevicePicker ? (
-                        <View style={{ marginTop: 10, gap: 8 }}>
-                          <Text style={s.lbl}>Pilih Terminal / Lokasi Peranti FR:</Text>
-                          <Select
-                            value={selectedFrLabel}
-                            placeholder="Pilih Peranti FR"
-                            options={dropdownFrOptions}
-                            onPick={onPickFrDevice}
-                          />
-                          {selectedFrLabel === MANUAL_FR_DEVICE_LABEL ? (
-                            <>
-                              <Text style={s.lbl}>IMEI Peranti FR (attendance_devices):</Text>
-                              <TextInput
-                                style={s.in}
-                                value={frTabletImei}
-                                onChangeText={async (v) => {
-                                  setFrTabletImei(v);
-                                  await SecureStore.setItemAsync('FR_TABLET_IMEI', v).catch(() => {});
-                                }}
-                                placeholder="Contoh: 772df402efe84b8293e95509af4b31e5"
-                                placeholderTextColor={C.mute}
-                                autoCapitalize="none"
-                                autoCorrect={false}
-                              />
-                            </>
-                          ) : (
-                            <Text style={{ fontSize: 11, color: C.mute }}>
-                              IMEI Peranti: {frTabletImei}
-                            </Text>
-                          )}
-                        </View>
-                      ) : null}
+                    <View style={{
+                      marginTop: 10,
+                      paddingTop: 10,
+                      borderTopWidth: 1,
+                      borderTopColor: C.line,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 6,
+                    }}>
+                      <MaterialIcons name="location-on" size={16} color={C.primary} />
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: C.ink, flex: 1 }} numberOfLines={1}>
+                        {activeLocDisplay}
+                      </Text>
                     </View>
                   </Card>
 
@@ -3329,17 +3305,10 @@ jobs:
                       style={{
                         position: 'absolute',
                         top: 12,
-                        left: 12,
                         right: 12,
-                        flexDirection: 'row',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
+                        alignItems: 'flex-end',
                       }}
                     >
-                      <View style={{ backgroundColor: 'rgba(20,20,26,0.75)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#22C55E' }} />
-                        <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '800' }}>FR TERMINAL AKTIF</Text>
-                      </View>
                       <View style={{ backgroundColor: 'rgba(20,20,26,0.75)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10 }}>
                         <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '800', fontVariant: ['tabular-nums'] }}>
                           {liveClock.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
