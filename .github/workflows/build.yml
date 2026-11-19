@@ -343,6 +343,25 @@ jobs:
             { label: 'Pejabat MTIB Wilayah Utara (Pulau Pinang)', imei: 'e171d2ad794f48138618564ae7c27c28' },
             { label: 'Testing', imei: 'a200f0387bd94a1487d8e627301db185' },
           ];
+          const GPS_DEVICE_LOC_LABEL = '📍 Lokasi GPS Semasa Peranti (Auto)';
+          const MANUAL_FR_DEVICE_LABEL = '✏️ Masukkan IMEI Peranti FR secara manual';
+          const PRESET_FR_DEVICES = [
+            { label: 'Menara PGRM 1 - Tingkat 17 (FR)', location: 'Menara PGRM 1 - Tingkat 17', imei: '772df402efe84b8293e95509af4b31e5' },
+            { label: 'Menara PGRM 1 - Tingkat 14 (FR)', location: 'Menara PGRM 1 - Tingkat 14', imei: '44f5bc3af8244d27a4233faa1821fff5' },
+            { label: 'Menara PGRM 1 - Tingkat 15 (FR)', location: 'Menara PGRM 1 - Tingkat 15', imei: '67ba6c25a80b4edbb9888c31d467a625' },
+            { label: 'Menara PGRM 1 - Tingkat 16 (FR)', location: 'Menara PGRM 1 - Tingkat 16', imei: '772df402efe84b8293e95509af4b31e5' },
+            { label: 'Menara PGRM 2 - Tingkat 9 (FR)', location: 'Menara PGRM 2 - Tingkat 9', imei: 'e1974353a35a4e08b5658e206cdce442' },
+            { label: 'Menara PGRM 2 - Tingkat 10 (FR)', location: 'Menara PGRM 2 - Tingkat 10', imei: '8fc4c9ed29f4412d85beaaa81dfe9ad9' },
+            { label: 'Menara PGRM 2 - Tingkat 12 (FR)', location: 'Menara PGRM 2 - Tingkat 12', imei: '05749877bde249b4901890bf179d7d65' },
+            { label: 'Pejabat MTIB Wilayah Tengah (FR)', location: 'Pejabat MTIB Wilayah Tengah', imei: '1c25283c7d3146a49b500058a620b9d0' },
+            { label: 'WISDEC 1 (FR)', location: 'WISDEC 1', imei: '1d79da6cb6a344dba41ad46e5af99416' },
+            { label: 'WISDEC 2 (FR)', location: 'WISDEC 2', imei: '9fe47379d5ec4adabb7e4630fee26638' },
+            { label: 'FIDEC 1 (FR)', location: 'FIDEC 1', imei: '4cb985f553124ceeabed1fea44bc6fdb' },
+            { label: 'FIDEC 3 (FR)', location: 'FIDEC 3', imei: '99ac221842804e2ab28fc0a1fab56952' },
+            { label: 'Pejabat MTIB Wilayah Timur (FR)', location: 'Pejabat MTIB Wilayah Timur (Kelantan)', imei: 'a58513c07d9b490fa8c06b352bc6b341' },
+            { label: 'Pejabat MTIB Wilayah Utara (FR)', location: 'Pejabat MTIB Wilayah Utara (Pulau Pinang)', imei: 'e171d2ad794f48138618564ae7c27c28' },
+            { label: 'Testing FR Terminal', location: 'Testing', imei: 'a200f0387bd94a1487d8e627301db185' },
+          ];
           const pad = (n) => String(n).padStart(2, '0');
           const t12 = (h, m) => `${pad(h % 12 || 12)}:${pad(m)} ${h < 12 ? 'AM' : 'PM'}`;
           const fromMs = (ms) => { const d = new Date(ms); return t12(d.getHours(), d.getMinutes()); };
@@ -382,14 +401,44 @@ jobs:
             }
             return false;
           };
-          const saveTagDetails = async (method, lat, lng) => {
+          const resolvePortalLocation = async (placeRaw, coordRaw) => {
+            const cleanPlace = String(placeRaw || '').replace(/\s+/g, ' ').trim();
+            const isHeader = /^(tempat\s*\/\s*jenis|tempat|lokasi|masa|kaedah|koordinat|-)$/i.test(cleanPlace);
+            const isGenericAct = /^(kehadiran biasa|bdr|kerja luar)$/i.test(cleanPlace);
+            const place = isHeader ? '' : cleanPlace;
+
+            const m = /(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/.exec(String(coordRaw || ''));
+            if (m) {
+              const lat = parseFloat(m[1]);
+              const lng = parseFloat(m[2]);
+              let geoAddr = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+              try {
+                const rev = await Promise.race([
+                  Location.reverseGeocodeAsync({ latitude: lat, longitude: lng }),
+                  new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3500)),
+                ]);
+                if (rev && rev.length > 0) {
+                  const r = rev[0];
+                  const streetPart = [r.name, r.street, r.city, r.subregion].filter(Boolean).join(', ');
+                  if (streetPart) geoAddr = `${streetPart} (${lat.toFixed(5)}, ${lng.toFixed(5)})`;
+                }
+              } catch (_) {}
+              if (place && !isGenericAct) return `${place} · ${geoAddr}`;
+              if (place && isGenericAct) return `${geoAddr} (${place})`;
+              return geoAddr;
+            }
+            return place || '';
+          };
+          const saveTagDetails = async (method, lat, lng, customAddress = '') => {
             try {
               const d = new Date();
               const key = `TAG_DETAILS_${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
               const cur = JSON.parse((await SecureStore.getItemAsync(key)) || '[]');
-              let address = 'Sedang memproses lokasi...';
+              let address = customAddress || 'Sedang memproses lokasi...';
               
-              if (lat && lng) {
+              if (customAddress) {
+                address = customAddress;
+              } else if (lat && lng) {
                 try {
                   const rev = await Promise.race([
                     Location.reverseGeocodeAsync({ latitude: lat, longitude: lng }),
@@ -737,7 +786,8 @@ jobs:
               const timeVal = isFirst ? first : last;
               const legacyMethod = isFirst ? firstM : lastM;
               const detail = isFirst ? tagDetails[0] : (tagDetails.length > 1 ? tagDetails[tagDetails.length - 1] : null);
-              const portalLoc = isFirst ? portalToday?.inLocation : portalToday?.outLocation;
+              const rawPortalLoc = isFirst ? portalToday?.inLocation : portalToday?.outLocation;
+              const portalLoc = rawPortalLoc && !/^tempat\s*\/\s*jenis$/i.test(rawPortalLoc.trim()) ? rawPortalLoc : '';
               if (!timeVal || timeVal === '—') {
                 Alert.alert(title, "Tiada rekod kehadiran.");
                 return;
@@ -922,10 +972,14 @@ jobs:
                                     for (var j = 0; j < tRows.length; j++) {
                                       var tc = tRows[j].querySelectorAll('td');
                                       if (tc.length >= 3) {
+                                        var tmVal = tc[0].innerText.trim();
+                                        var locVal = tc[2].innerText.replace(/\s+/g, ' ').trim();
+                                        if (!/\d{1,2}:\d{2}/.test(tmVal) || /^tempat\s*\/\s*jenis$/i.test(locVal)) continue;
                                         txList.push({
-                                          time: tc[0].innerText.trim(),
+                                          time: tmVal,
                                           method: detectMethod(tc[1]) || '',
-                                          location: tc[2].innerText.replace(/\s+/g, ' ').trim()
+                                          location: locVal,
+                                          coord: tc[3] ? tc[3].innerText.replace(/\s+/g, ' ').trim() : ''
                                         });
                                       }
                                     }
@@ -963,15 +1017,18 @@ jobs:
                           ];
                           const tr = msg.rows.find((r) => pats.includes(String(r.date || '').trim()));
                           if (tr) {
+                            const firstTx = Array.isArray(tr.transactions) && tr.transactions.length > 0 ? tr.transactions[0] : null;
                             const lastTx = Array.isArray(tr.transactions) && tr.transactions.length > 0 ? tr.transactions[tr.transactions.length - 1] : null;
+                            const resolvedIn = await resolvePortalLocation(firstTx?.location, firstTx?.coord);
+                            const resolvedOut = await resolvePortalLocation(lastTx?.location, lastTx?.coord);
                             const syncedObj = {
                               date: todayStr(),
                               clockIn: tr.clockIn || '',
                               clockOut: tr.clockOut || (lastTx ? lastTx.time : ''),
-                              inMethod: tr.inMethod || (tr.transactions?.[0]?.method || ''),
+                              inMethod: tr.inMethod || (firstTx?.method || ''),
                               outMethod: tr.outMethod || (lastTx?.method || ''),
-                              inLocation: tr.transactions?.[0]?.location || '',
-                              outLocation: lastTx?.location || '',
+                              inLocation: resolvedIn,
+                              outLocation: resolvedOut,
                             };
                             setPortalToday(syncedObj);
                             await SecureStore.setItemAsync('SYNCED_TODAY_PORTAL', JSON.stringify(syncedObj)).catch(() => {});
@@ -1190,14 +1247,17 @@ jobs:
                       await SecureStore.setItemAsync('WBF_TODAY_DATE', todayStr()).catch(() => {});
                       if (pInMs) await SecureStore.setItemAsync('WBF_TODAY_FIRST_MS', String(pInMs)).catch(() => {});
                       if (effectiveOutMs) await SecureStore.setItemAsync('WBF_TODAY_LAST_MS', String(effectiveOutMs)).catch(() => {});
+                      const firstTx = Array.isArray(todayRow.transactions) && todayRow.transactions.length > 0 ? todayRow.transactions[0] : null;
+                      const resolvedInLoc = await resolvePortalLocation(firstTx?.location, firstTx?.coord);
+                      const resolvedOutLoc = await resolvePortalLocation(lastTx?.location, lastTx?.coord);
                       await SecureStore.setItemAsync('SYNCED_TODAY_PORTAL', JSON.stringify({
                         date: todayStr(),
                         clockIn: todayRow.clockIn || '',
                         clockOut: todayRow.clockOut || (lastTx && effectiveOutMs ? lastTx.time : ''),
-                        inMethod: todayRow.inMethod || (todayRow.transactions?.[0]?.method || ''),
+                        inMethod: todayRow.inMethod || (firstTx?.method || ''),
                         outMethod: todayRow.outMethod || (lastTx?.method || ''),
-                        inLocation: todayRow.transactions?.[0]?.location || '',
-                        outLocation: lastTx?.location || '',
+                        inLocation: resolvedInLoc,
+                        outLocation: resolvedOutLoc,
                       })).catch(() => {});
                       await syncWbfReminders({
                         firstMs: pInMs || undefined,
@@ -1320,12 +1380,15 @@ jobs:
                             var txRows = logModal.querySelectorAll('tbody tr');
                             for (var j = 0; j < txRows.length; j++) {
                               var tCells = txRows[j].querySelectorAll('td');
-                              if (tCells.length >= 4) {
+                              if (tCells.length >= 3) {
+                                var tmTxt = tCells[0].innerText.trim();
+                                var locTxt = tCells[2].innerText.replace(/\\s+/g, ' ').trim();
+                                if (!/\\d{1,2}:\\d{2}/.test(tmTxt) || /^tempat\\s*\\/\\s*jenis$/i.test(locTxt)) continue;
                                 txList.push({
-                                  time: tCells[0].innerText.trim(),
+                                  time: tmTxt,
                                   method: detectMethod(tCells[1]) || 'other',
-                                  location: tCells[2].innerText.replace(/\\s+/g, ' ').trim(),
-                                  coord: tCells[3].innerText.replace(/\\s+/g, ' ').trim()
+                                  location: locTxt,
+                                  coord: tCells[3] ? tCells[3].innerText.replace(/\\s+/g, ' ').trim() : ''
                                 });
                               }
                             }
@@ -2588,6 +2651,7 @@ jobs:
           function FaceRecognitionView({ sess, back }) {
             const { C, s } = useT();
             const [perm, ask] = useCameraPermissions();
+            const loc = useFix();
             const ref = useRef(null);
             const [shot, setShot] = useState(null);
             const [refFace, setRefFace] = useState(null);
@@ -2602,9 +2666,119 @@ jobs:
             const [err, setErr] = useState('');
             const [ok, setOk] = useState('');
             const [statusText, setStatusText] = useState('Letakkan wajah anda di dalam bingkai bujur');
+            const [liveGpsAddress, setLiveGpsAddress] = useState('');
+
+            // State Peranti FR (Lokasi GPS Peranti + Terminal FR)
+            const [frDevices, setFrDevices] = useState(PRESET_FR_DEVICES);
+            const [selectedFrLabel, setSelectedFrLabel] = useState(GPS_DEVICE_LOC_LABEL);
+            const [frTabletImei, setFrTabletImei] = useState(PRESET_FR_DEVICES[0].imei);
+            const [showDevicePicker, setShowDevicePicker] = useState(false);
+            const [askFrPwd, setAskFrPwd] = useState(false);
+            const [frUnlocked, setFrUnlocked] = useState(false);
+            const [frPwd, setFrPwd] = useState('');
+            const [customEpInput, setCustomEpInput] = useState('');
+            const [liveClock, setLiveClock] = useState(new Date());
+
+            useEffect(() => {
+              const t = setInterval(() => setLiveClock(new Date()), 1000);
+              return () => clearInterval(t);
+            }, []);
+
+            useEffect(() => {
+              let on = true;
+              if (!loc.fix) return () => { on = false; };
+              (async () => {
+                try {
+                  const rev = await Promise.race([
+                    Location.reverseGeocodeAsync({ latitude: loc.fix.latitude, longitude: loc.fix.longitude }),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 4000)),
+                  ]);
+                  if (!on) return;
+                  if (rev && rev.length > 0) {
+                    const r = rev[0];
+                    const addr = [r.name, r.street, r.city, r.subregion].filter(Boolean).join(', ');
+                    setLiveGpsAddress(addr || `${loc.fix.latitude.toFixed(5)}, ${loc.fix.longitude.toFixed(5)}`);
+                  } else {
+                    setLiveGpsAddress(`${loc.fix.latitude.toFixed(5)}, ${loc.fix.longitude.toFixed(5)}`);
+                  }
+                } catch (_) {
+                  if (on && loc.fix) {
+                    setLiveGpsAddress(`${loc.fix.latitude.toFixed(5)}, ${loc.fix.longitude.toFixed(5)}`);
+                  }
+                }
+              })();
+              return () => { on = false; };
+            }, [loc.fix]);
 
             const refKey = `FACE_REF_${sess?.staff_no || 'DEFAULT'}`;
             const syncFlagKey = `FACE_SRV_SYNCED_${sess?.staff_no || 'DEFAULT'}`;
+            const paddedCardNo = String(sess?.staff_no || '').trim().padStart(8, '0');
+
+            const getActiveDeviceLocation = useCallback(() => {
+              if (selectedFrLabel === GPS_DEVICE_LOC_LABEL) {
+                if (liveGpsAddress) return liveGpsAddress;
+                if (loc.fix) return `${loc.fix.latitude.toFixed(5)}, ${loc.fix.longitude.toFixed(5)}`;
+                return loc.err || 'Mengesan lokasi GPS peranti…';
+              }
+              if (selectedFrLabel === MANUAL_FR_DEVICE_LABEL) {
+                return frTabletImei ? `Peranti FR (${frTabletImei.slice(0, 12)}…)` : 'Peranti FR Mudah Alih';
+              }
+              const found = frDevices.find((d) => d.label === selectedFrLabel);
+              return found?.location || selectedFrLabel.replace(/\s*\(FR\)\s*$/i, '').trim() || 'Menara PGRM 1 - Tingkat 17';
+            }, [selectedFrLabel, liveGpsAddress, loc.fix, loc.err, frTabletImei, frDevices]);
+
+            useEffect(() => {
+              let active = true;
+              (async () => {
+                const savedEp = await SecureStore.getItemAsync('FR_CUSTOM_ENDPOINT').catch(() => null);
+                const savedImei = await SecureStore.getItemAsync('FR_TABLET_IMEI').catch(() => null);
+                const savedDevLbl = await SecureStore.getItemAsync('FR_DEVICE_LABEL').catch(() => null);
+                if (savedEp && active) setCustomEpInput(savedEp);
+                if (savedImei && active) setFrTabletImei(savedImei);
+                if (savedDevLbl && active) setSelectedFrLabel(savedDevLbl);
+
+                try {
+                  const res = await call(EP.tabletRef, {});
+                  if (!active) return;
+                  const parsed = parseTabletLocations(res);
+                  const mergedMap = new Map();
+                  PRESET_FR_DEVICES.forEach((x) => mergedMap.set(x.label.toLowerCase(), x));
+                  parsed.forEach((x) => {
+                    if (x.imei && x.label) {
+                      const lbl = `${x.location || x.label} (FR)`;
+                      mergedMap.set(lbl.toLowerCase(), {
+                        label: lbl,
+                        location: x.location || x.label,
+                        imei: x.imei,
+                      });
+                    }
+                  });
+                  const combined = [...mergedMap.values()];
+                  setFrDevices(combined);
+                  if (savedDevLbl && savedDevLbl !== MANUAL_FR_DEVICE_LABEL && savedDevLbl !== GPS_DEVICE_LOC_LABEL) {
+                    const m = combined.find((d) => d.label === savedDevLbl);
+                    if (m) {
+                      setSelectedFrLabel(m.label);
+                      setFrTabletImei(m.imei);
+                    }
+                  }
+                } catch (_) {}
+              })();
+              return () => { active = false; };
+            }, []);
+
+            const onPickFrDevice = async (lbl) => {
+              setSelectedFrLabel(lbl);
+              setErr('');
+              setOk('');
+              await SecureStore.setItemAsync('FR_DEVICE_LABEL', lbl).catch(() => {});
+              if (lbl === MANUAL_FR_DEVICE_LABEL || lbl === GPS_DEVICE_LOC_LABEL) return;
+              const found = frDevices.find((d) => d.label === lbl);
+              if (found) {
+                setFrTabletImei(found.imei);
+                await SecureStore.setItemAsync('FR_TABLET_IMEI', found.imei).catch(() => {});
+              }
+            };
 
             const syncFromServerStorage = useCallback(async (silent = true) => {
               if (!sess?.staff_no) return;
@@ -2624,7 +2798,7 @@ jobs:
                 } else if (!silent) {
                   Alert.alert(
                     'Storan Wajah Pelayan',
-                    'Tiada gambar wajah ditemui di pelayan lagi. Sila ambil gambar wajah anda dan tekan "Simpan & Segerak Pelayan" untuk memuat naik ke storan pelayan.'
+                    'Tiada gambar wajah ditemui di pelayan lagi. Sila ambil gambar wajah anda dan tekan "Segerak Pelayan".'
                   );
                 }
               } catch (e) {
@@ -2654,9 +2828,9 @@ jobs:
                 const isAuto = autoPref === 'true';
                 if (on) setOkuAutoEnabled(isAuto);
                 if (isAuto) {
-                  speakMalay('Mod bebas tangan aktif. Halakan telefon ke wajah anda. Mengimbas secara automatik dalam 3 saat.');
+                  speakMalay('Mod terminal FR bebas tangan aktif. Halakan telefon ke wajah anda. Mengimbas secara automatik dalam 3 saat.');
                 } else {
-                  speakMalay('Skrin pengecaman wajah dibuka. Halakan kamera hadapan ke wajah anda, kemudian tekan butang imbas dan rekod wajah sekarang.');
+                  speakMalay('Terminal pengecaman wajah F R dibuka. Halakan kamera hadapan ke wajah anda, kemudian tekan butang imbas dan rekod wajah sekarang.');
                 }
                 await syncFromServerStorage(true);
               })();
@@ -2666,7 +2840,6 @@ jobs:
               };
             }, [refKey, syncFlagKey, syncFromServerStorage]);
 
-            // Jika Mod Auto-Imbas OKU aktif, mulakan kiraan 3 saat & auto-hantar sebaik sahaja kamera sedia (tanpa GPS)
             useEffect(() => {
               if (!okuAutoEnabled || autoTriggeredRef.current) return;
               if (!perm?.granted || shot || busy || ok) return;
@@ -2693,7 +2866,7 @@ jobs:
                 );
                 setShot(resized);
                 triggerVibrate(false);
-                setStatusText('Wajah dirakam! Sedia untuk pengesahan & segerak pelayan.');
+                setStatusText('Wajah dirakam! Sedia untuk pengesahan Terminal FR.');
                 return resized;
               } catch (e) {
                 setErr(e.message || 'Ralat kamera semasa merakam wajah.');
@@ -2749,6 +2922,11 @@ jobs:
               }
             };
 
+            const nowSqlTimestamp = () => {
+              const d = new Date();
+              return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+            };
+
             const enrollReferenceFace = async () => {
               if (!sess?.staff_id) {
                 return setErr('ID staff belum dimuatkan. Kembali ke Dashboard dan tunggu data dimuat.');
@@ -2758,41 +2936,23 @@ jobs:
               setSyncingServer(true);
               setErr('');
               setOk('');
-              setStatusText('Menyimpan & menyegerakkan wajah ke storan pelayan iHR…');
+              setStatusText('Menyimpan & menyegerakkan wajah rujukan…');
               try {
                 const dataUri = `data:image/jpeg;base64,${target.base64}`;
                 await SecureStore.setItemAsync(refKey, dataUri).catch(() => {});
                 setRefFace(dataUri);
 
-                const uploaded = await uploadFaceToServerStorage(target.base64);
-                if (!uploaded) {
-                  // Segerakkan melalui laluan rekod FR pelayan supaya gambar wajah tersimpan dalam storan pelayan
-                  await call(EP.fr, {
-                    staff_id: sess.staff_id,
-                    staff_no: sess.staff_no,
-                    method: 'fr',
-                    activity_type: 1,
-                    img: target.base64,
-                  }).catch(async () => {
-                    await call(EP.geotag, {
-                      staff_id: sess.staff_id,
-                      staff_no: sess.staff_no,
-                      method: 'fr',
-                      activity_type: 1,
-                      img: target.base64,
-                    });
-                  });
-                }
+                await uploadFaceToServerStorage(target.base64);
+                await syncFromServerStorage(true);
 
                 setServerSynced(true);
                 await SecureStore.setItemAsync(syncFlagKey, 'true').catch(() => {});
-                await syncFromServerStorage(true);
                 triggerVibrate(true);
-                setStatusText('Wajah berjaya disegerakkan ke storan pelayan!');
-                setOk('Wajah rujukan telah disimpan dan disegerakkan ke storan Pengecaman Wajah pelayan iHR.');
-                speakMalay('Wajah rujukan berjaya disimpan dan disegerakkan ke pelayan.');
+                setStatusText('Wajah rujukan aktif & disegerakkan!');
+                setOk('Wajah rujukan berjaya disimpan dan disegerakkan untuk Terminal FR.');
+                speakMalay('Wajah rujukan berjaya disimpan dan disegerakkan.');
               } catch (e) {
-                setErr(`Wajah disimpan pada peranti, tetapi gagal muat naik ke pelayan: ${e.message}`);
+                setErr(`Ralat semasa menyimpan wajah rujukan: ${e.message}`);
               } finally {
                 setSyncingServer(false);
               }
@@ -2810,21 +2970,52 @@ jobs:
               setBusy(true);
               setErr('');
               setOk('');
-              setStatusText('Mengesahkan & menyegerakkan wajah dengan pelayan iHR…');
+              let liveFix = loc.fix;
+              if (!liveFix) {
+                try {
+                  const p = await Location.requestForegroundPermissionsAsync();
+                  if (p.status === 'granted') {
+                    const fresh = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+                    if (fresh?.coords) {
+                      liveFix = fresh.coords;
+                      loc.setFix(fresh.coords);
+                    }
+                  }
+                } catch (_) {}
+              }
+              const liveLat = liveFix?.latitude;
+              const liveLng = liveFix?.longitude;
+              if (liveLat == null || liveLng == null) {
+                setBusy(false);
+                setStatusText('Lokasi GPS peranti diperlukan.');
+                speakMalay('Tiada akses lokasi G P S peranti. Sila hidupkan lokasi telefon anda.');
+                return setErr('Tiada akses lokasi GPS peranti. Sila hidupkan GPS / Lokasi telefon anda dan cuba semula.');
+              }
 
-              const savedTabletImei = await SecureStore.getItemAsync('FR_TABLET_IMEI').catch(() => null);
-              const customFrPath = await SecureStore.getItemAsync('FR_CUSTOM_ENDPOINT').catch(() => null);
+              const isGpsMode = selectedFrLabel === GPS_DEVICE_LOC_LABEL;
+              const activeLoc = isGpsMode
+                ? (liveGpsAddress || `${liveLat.toFixed(5)}, ${liveLng.toFixed(5)}`)
+                : getActiveDeviceLocation();
+              setStatusText(`Menghantar rekod FR (${activeLoc})…`);
 
-              const payload = {
+              const savedTabletImei = frTabletImei || (await SecureStore.getItemAsync('FR_TABLET_IMEI').catch(() => null)) || '772df402efe84b8293e95509af4b31e5';
+              const customFrPath = customEpInput || (await SecureStore.getItemAsync('FR_CUSTOM_ENDPOINT').catch(() => null));
+              const capTime = nowSqlTimestamp();
+
+              const deviceDataPayload = {
                 staff_id: sess.staff_id,
                 staff_no: sess.staff_no,
-                imei: String(deviceId()),
-                tablet_imei: savedTabletImei || undefined,
-                device_imei: savedTabletImei || undefined,
+                card_no: paddedCardNo,
+                card_name: sess.name || '',
+                captured_time: capTime,
+                imei: savedTabletImei,
+                device_imei: savedTabletImei,
+                device_location: activeLoc,
+                latitude: liveLat,
+                longitude: liveLng,
                 type: 'fr',
                 method: 'fr',
                 attendance_type: 'fr',
-                tag_type: 'fr',
                 img: target.base64,
                 face_image: target.base64,
               };
@@ -2842,30 +3033,51 @@ jobs:
 
               try {
                 let res = null;
-                let lastErr = null;
+                let syncedToDeviceDatas = false;
                 for (let i = 0; i < candidateEps.length; i++) {
                   try {
-                    res = await call(candidateEps[i], payload);
-                    lastErr = null;
+                    res = await call(candidateEps[i], deviceDataPayload);
+                    syncedToDeviceDatas = true;
                     break;
                   } catch (eTry) {
-                    lastErr = eTry;
                     const msg = String(eTry?.message || '');
-                    if (msg.includes('[F001]') || msg.includes('HTTP 404')) {
+                    if (msg.includes('[F001]') || msg.includes('HTTP 404') || msg.includes('HTTP 405')) {
                       continue;
                     }
                     throw eTry;
                   }
                 }
-                if (lastErr) {
-                  throw new Error('Laluan API FR pelayan tidak ditemui (HTTP 404). Jangan guna fallback Geotag supaya simbol FR (fa-user-check) dikekalkan. Tekan lama tajuk "Pengecaman Wajah (FR)" untuk tetapan laluan API FR pelayan.');
+
+                // Hantar dengan koordinat GPS sebenar peranti ke pelayan iHR
+                if (!syncedToDeviceDatas) {
+                  res = await call(EP.geotag, {
+                    staff_id: sess.staff_id,
+                    activity_type: 1,
+                    method: 'fr',
+                    latitude: liveLat,
+                    longitude: liveLng,
+                    img: target.base64,
+                  });
                 }
 
-                // Pastikan gambar wajah turut disegerakkan ke storan FR pelayan
-                uploadFaceToServerStorage(target.base64).catch(() => {});
-
                 await addLocalTag('fr');
-                await saveTagDetails('fr', null, null);
+                await saveTagDetails('fr', liveLat, liveLng, isGpsMode ? '' : activeLoc);
+                try {
+                  const prevSyncStr = await SecureStore.getItemAsync('SYNCED_TODAY_PORTAL');
+                  const prevSync = prevSyncStr ? JSON.parse(prevSyncStr) : null;
+                  const now12 = fromMs(Date.now());
+                  const isSameDay = prevSync && prevSync.date === todayStr();
+                  const nextSync = {
+                    date: todayStr(),
+                    clockIn: (isSameDay && prevSync.clockIn) ? prevSync.clockIn : now12,
+                    clockOut: (isSameDay && prevSync.clockIn) ? now12 : '',
+                    inMethod: (isSameDay && prevSync.clockIn) ? (prevSync.inMethod || 'fr') : 'fr',
+                    outMethod: (isSameDay && prevSync.clockIn) ? 'fr' : '',
+                    inLocation: (isSameDay && prevSync.clockIn) ? (prevSync.inLocation || activeLoc) : activeLoc,
+                    outLocation: (isSameDay && prevSync.clockIn) ? activeLoc : '',
+                  };
+                  await SecureStore.setItemAsync('SYNCED_TODAY_PORTAL', JSON.stringify(nextSync));
+                } catch (_) {}
                 const dataUri = `data:image/jpeg;base64,${target.base64}`;
                 if (!refFace) {
                   await SecureStore.setItemAsync(refKey, dataUri).catch(() => {});
@@ -2875,10 +3087,12 @@ jobs:
                 await SecureStore.setItemAsync(syncFlagKey, 'true').catch(() => {});
                 triggerVibrate(true);
                 const nowTimeSpoken = fromMs(Date.now());
-                setStatusText('Pengecaman wajah disahkan & disegerakkan!');
-                const okMsg = typeof res === 'string' ? res : (res?.message || 'Kehadiran Pengecaman Wajah (FR) berjaya direkodkan dengan simbol FR.');
+                setStatusText(`Disahkan oleh Peranti FR · ${activeLoc}`);
+                const okMsg = typeof res === 'string'
+                  ? res
+                  : (res?.message || `Kehadiran Peranti FR (${activeLoc}) berjaya direkodkan untuk No. Kad ${paddedCardNo}.`);
                 setOk(okMsg);
-                speakMalay(`Berjaya! Kehadiran pengecaman wajah anda telah direkodkan pada pukul ${nowTimeSpoken}.`);
+                speakMalay(`Berjaya! Kehadiran pengecaman wajah anda direkodkan di ${activeLoc} pada pukul ${nowTimeSpoken}.`);
               } catch (e) {
                 setStatusText('Pengesahan gagal. Sila cuba semula.');
                 setErr(e.message);
@@ -2895,17 +3109,6 @@ jobs:
               }
             };
 
-            const [askFrPwd, setAskFrPwd] = useState(false);
-            const [frUnlocked, setFrUnlocked] = useState(false);
-            const [frPwd, setFrPwd] = useState('');
-            const [customEpInput, setCustomEpInput] = useState('');
-            const [frTabletImei, setFrTabletImei] = useState('');
-
-            useEffect(() => {
-              SecureStore.getItemAsync('FR_CUSTOM_ENDPOINT').then((v) => { if (v) setCustomEpInput(v); }).catch(() => {});
-              SecureStore.getItemAsync('FR_TABLET_IMEI').then((v) => { if (v) setFrTabletImei(v); }).catch(() => {});
-            }, []);
-
             if (!perm?.granted) {
               return (
                 <View style={{ flex: 1 }}>
@@ -2917,6 +3120,9 @@ jobs:
                 </View>
               );
             }
+
+            const dropdownFrOptions = [GPS_DEVICE_LOC_LABEL, ...frDevices.map((d) => d.label), MANUAL_FR_DEVICE_LABEL];
+            const activeLocDisplay = getActiveDeviceLocation();
 
             return (
               <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 32 }}>
@@ -2938,23 +3144,13 @@ jobs:
                 )}
                 {frUnlocked && (
                   <View style={{ padding: 16, gap: 10 }}>
-                    <Card title="Tetapan API FR Pelayan (Admin)" icon="⚙️" tint={C.primary}>
-                      <Text style={s.lbl}>Laluan API FR Laravel (cth: api/fr_scanner):</Text>
+                    <Card title="Tetapan API Peranti FR (Admin)" icon="⚙️" tint={C.primary}>
+                      <Text style={s.lbl}>Laluan API FR Laravel (cth: api/device_data):</Text>
                       <TextInput
                         style={s.in}
                         value={customEpInput}
                         onChangeText={setCustomEpInput}
-                        placeholder="api/fr_scanner"
-                        placeholderTextColor={C.mute}
-                        autoCapitalize="none"
-                        autoCorrect={false}
-                      />
-                      <Text style={[s.lbl, { marginTop: 10 }]}>IMEI Peranti FR (cth: Menara PGRM 1 - Tingkat 17):</Text>
-                      <TextInput
-                        style={s.in}
-                        value={frTabletImei}
-                        onChangeText={setFrTabletImei}
-                        placeholder="IMEI dari attendance_devices"
+                        placeholder="api/device_data"
                         placeholderTextColor={C.mute}
                         autoCapitalize="none"
                         autoCorrect={false}
@@ -2962,14 +3158,12 @@ jobs:
                       <View style={{ marginTop: 10 }}>
                         <Btn
                           icon="💾"
-                          label="Simpan Tetapan FR"
+                          label="Simpan Laluan API FR"
                           onPress={async () => {
                             if (customEpInput.trim()) await SecureStore.setItemAsync('FR_CUSTOM_ENDPOINT', customEpInput.trim());
                             else await SecureStore.deleteItemAsync('FR_CUSTOM_ENDPOINT');
-                            if (frTabletImei.trim()) await SecureStore.setItemAsync('FR_TABLET_IMEI', frTabletImei.trim());
-                            else await SecureStore.deleteItemAsync('FR_TABLET_IMEI');
                             triggerVibrate(true);
-                            Alert.alert('Disimpan', 'Tetapan API FR & IMEI peranti telah disimpan.');
+                            Alert.alert('Disimpan', 'Laluan API Peranti FR telah disimpan.');
                           }}
                         />
                       </View>
@@ -3005,7 +3199,7 @@ jobs:
                           {sess?.name || 'Pengguna'}
                         </Text>
                         <Text style={{ fontSize: 11, color: C.mute, marginTop: 2 }}>
-                          No. Staf: {sess?.staff_no || '-'} · {serverSynced ? '☁️ Segerak Storan Pelayan' : refFace ? '📱 Wajah Rujukan Lokal' : 'ℹ️ Belum Daftar Wajah'}
+                          ID Kad FR: {paddedCardNo} · {serverSynced ? '☁️ Segerak Pelayan' : '📱 Terminal Mudah Alih'}
                         </Text>
                       </View>
                       <Pressable
@@ -3058,6 +3252,69 @@ jobs:
                         <MaterialIcons name={okuVoiceLocal ? 'volume-up' : 'volume-off'} size={20} color={okuVoiceLocal ? C.onPrimary : C.mute} />
                       </Pressable>
                     </View>
+
+                    <View style={{ marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: C.line }}>
+                      <Pressable
+                        onPress={() => setShowDevicePicker(!showDevicePicker)}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          backgroundColor: C.field,
+                          paddingHorizontal: 12,
+                          paddingVertical: 10,
+                          borderRadius: 12,
+                          borderWidth: 1,
+                          borderColor: C.line,
+                        }}
+                      >
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                          <MaterialIcons name="tablet-android" size={18} color={C.primary} />
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ fontSize: 10, fontWeight: '700', color: C.mute, textTransform: 'uppercase' }}>
+                              Mod Terminal Peranti FR
+                            </Text>
+                            <Text style={{ fontSize: 13, fontWeight: '800', color: C.ink }} numberOfLines={1}>
+                              {activeLocDisplay}
+                            </Text>
+                          </View>
+                        </View>
+                        <Text style={{ color: C.mute, fontSize: 12, marginLeft: 6 }}>{showDevicePicker ? '▲' : '▼'}</Text>
+                      </Pressable>
+
+                      {showDevicePicker ? (
+                        <View style={{ marginTop: 10, gap: 8 }}>
+                          <Text style={s.lbl}>Pilih Terminal / Lokasi Peranti FR:</Text>
+                          <Select
+                            value={selectedFrLabel}
+                            placeholder="Pilih Peranti FR"
+                            options={dropdownFrOptions}
+                            onPick={onPickFrDevice}
+                          />
+                          {selectedFrLabel === MANUAL_FR_DEVICE_LABEL ? (
+                            <>
+                              <Text style={s.lbl}>IMEI Peranti FR (attendance_devices):</Text>
+                              <TextInput
+                                style={s.in}
+                                value={frTabletImei}
+                                onChangeText={async (v) => {
+                                  setFrTabletImei(v);
+                                  await SecureStore.setItemAsync('FR_TABLET_IMEI', v).catch(() => {});
+                                }}
+                                placeholder="Contoh: 772df402efe84b8293e95509af4b31e5"
+                                placeholderTextColor={C.mute}
+                                autoCapitalize="none"
+                                autoCorrect={false}
+                              />
+                            </>
+                          ) : (
+                            <Text style={{ fontSize: 11, color: C.mute }}>
+                              IMEI Peranti: {frTabletImei}
+                            </Text>
+                          )}
+                        </View>
+                      ) : null}
+                    </View>
                   </Card>
 
                   <View style={[s.cam, { height: 370, position: 'relative' }]}>
@@ -3071,13 +3328,36 @@ jobs:
                       pointerEvents="none"
                       style={{
                         position: 'absolute',
+                        top: 12,
+                        left: 12,
+                        right: 12,
+                        flexDirection: 'row',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <View style={{ backgroundColor: 'rgba(20,20,26,0.75)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#22C55E' }} />
+                        <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '800' }}>FR TERMINAL AKTIF</Text>
+                      </View>
+                      <View style={{ backgroundColor: 'rgba(20,20,26,0.75)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 10 }}>
+                        <Text style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '800', fontVariant: ['tabular-nums'] }}>
+                          {liveClock.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View
+                      pointerEvents="none"
+                      style={{
+                        position: 'absolute',
                         top: 0,
                         left: 0,
                         right: 0,
                         bottom: 0,
                         alignItems: 'center',
                         justifyContent: 'center',
-                        backgroundColor: 'rgba(0,0,0,0.18)',
+                        backgroundColor: 'rgba(0,0,0,0.16)',
                       }}
                     >
                       <View
@@ -3183,6 +3463,7 @@ jobs:
 
                   <Err msg={err} />
                   <Ok msg={ok} />
+                  <Loc {...loc} />
                 </View>
               </ScrollView>
             );
@@ -3612,12 +3893,12 @@ jobs:
           dashboard: { path: 'api/dashboard',         method: 'POST', code: 'D', flip: true, retry: true },
           geotag:    { path: 'api/geotagging',        method: 'POST', code: 'G', retry: true, jsonFirst: true },
           qr:        { path: 'api/qr_scanner',        method: 'POST', code: 'Q', retry: true },
-          fr:        { path: 'api/fr_scanner',        method: 'POST', code: 'F', retry: true, jsonFirst: true },
-          fr2:       { path: 'api/facial_recognition',method: 'POST', code: 'F', retry: true, jsonFirst: true },
-          fr3:       { path: 'api/face_scanner',      method: 'POST', code: 'F', retry: true, jsonFirst: true },
-          fr4:       { path: 'api/face_attendance',   method: 'POST', code: 'F', retry: true, jsonFirst: true },
-          fr5:       { path: 'api/fr_attendance',     method: 'POST', code: 'F', retry: true, jsonFirst: true },
-          fr6:       { path: 'api/face_recognition',  method: 'POST', code: 'F', retry: true, jsonFirst: true },
+          fr:        { path: 'api/device_data',       method: 'POST', code: 'F', retry: true, jsonFirst: true },
+          fr2:       { path: 'api/device_datas',      method: 'POST', code: 'F', retry: true, jsonFirst: true },
+          fr3:       { path: 'api/biometric',         method: 'POST', code: 'F', retry: true, jsonFirst: true },
+          fr4:       { path: 'api/fr_scanner',        method: 'POST', code: 'F', retry: true, jsonFirst: true },
+          fr5:       { path: 'api/face_recognition',  method: 'POST', code: 'F', retry: true, jsonFirst: true },
+          fr6:       { path: 'api/face',              method: 'POST', code: 'F', retry: true, jsonFirst: true },
           frAlt:     { path: 'api/fr',                method: 'POST', code: 'F', retry: true, jsonFirst: true },
           frEnroll:  { path: 'api/face_registration', method: 'POST', code: 'F', retry: true, jsonFirst: true },
           frEnrollAlt:{ path: 'api/save_face',        method: 'POST', code: 'F', retry: true, jsonFirst: true },
@@ -3932,7 +4213,7 @@ jobs:
         with:
           tag_name: "v1.1.0-${{ github.run_number }}"
           name: "iHR APK Build v1.1.0 #${{ github.run_number }}"
-          body: "iHR APK v1.1.0: OKU Blind Voice & Hands-Free Face Recognition (FR), Server-Linked WBF Reminders, Direct In-App PDF Download, Native Vibration & Haptics, 5 Color Themes :malaysia: :good:."
+          body: "iHR APK v1.1.0: OKU Blind Voice & Hands-Free Face Recognition (FR), Server-Linked WBF Reminders, Direct In-App PDF Download, Native Vibration & Haptics, 5 Color Themes, and Admin QR Generator."
           draft: false
           prerelease: false
           files: app/android/app/build/outputs/apk/release/*.apk
