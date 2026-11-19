@@ -732,7 +732,7 @@ jobs:
                 }
               } catch (_) {}
 
-              // 2. Segerakkan data terkini daripada pelayan di latar belakang
+              // 2. Kemaskini data terkini daripada pelayan di latar belakang
               try {
                 const r = await call(EP.dashboard, { staff_no: sess.staff_no, staff_id: sess.staff_id });
                 setData(r); setOnline(true); setAt(new Date().toLocaleTimeString('ms-MY', { hour: '2-digit', minute: '2-digit' }));
@@ -826,7 +826,7 @@ jobs:
                  );
               } else if (legacyMethod) {
                  const methodName = labelOfMethod(legacyMethod);
-                 const locLine = portalLoc ? `Lokasi: ${portalLoc}` : '*Disegerakkan daripada Log Kehadiran portal.*';
+                 const locLine = portalLoc ? `Lokasi: ${portalLoc}` : '*Dikemaskini daripada Log Kehadiran portal.*';
                  speakMalay(`${title} pada pukul ${timeVal}, menggunakan kaedah ${methodName}${portalLoc ? ', di ' + portalLoc : ''}.`);
                  Alert.alert(
                    `Maklumat ${title}`, 
@@ -1982,7 +1982,7 @@ jobs:
                   <View style={{ flex: 1 }}>
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 8, backgroundColor: C.field, borderBottomWidth: 1, borderBottomColor: C.line }}>
                       <Text style={{ fontSize: 11, color: rowsList.length > 0 ? '#2E7D4F' : C.mute, fontWeight: '700' }}>
-                        {rowsList.length > 0 ? `✓ ${rowsList.length} hari disegerakkan (${monthNames[selMonth - 1]} ${selYear})` : '🌐 ihr.mtib.gov.my'}
+                        {rowsList.length > 0 ? `✓ ${rowsList.length} hari dikemaskini (${monthNames[selMonth - 1]} ${selYear})` : '🌐 ihr.mtib.gov.my'}
                       </Text>
                       <View style={{ flexDirection: 'row', gap: 8 }}>
                         <Pressable
@@ -2833,12 +2833,12 @@ jobs:
                   await SecureStore.setItemAsync(syncFlagKey, 'true').catch(() => {});
                   if (!silent) {
                     triggerVibrate(true);
-                    setOk('Wajah rujukan berjaya disegerakkan daripada storan pelayan iHR.');
+                    setOk('Wajah rujukan berjaya dikemaskini daripada pelayan iHR.');
                   }
                 } else if (!silent) {
                   Alert.alert(
                     'Storan Wajah Pelayan',
-                    'Tiada gambar wajah ditemui di pelayan lagi. Sila ambil gambar wajah anda dan tekan "Segerak Pelayan".'
+                    'Tiada gambar wajah ditemui di pelayan lagi. Sila ambil gambar wajah anda dan tekan "Kemaskini Pelayan".'
                   );
                 }
               } catch (e) {
@@ -2988,9 +2988,9 @@ jobs:
                 setServerSynced(true);
                 await SecureStore.setItemAsync(syncFlagKey, 'true').catch(() => {});
                 triggerVibrate(true);
-                setStatusText('Wajah rujukan aktif & disegerakkan!');
-                setOk('Wajah rujukan berjaya disimpan dan disegerakkan untuk Terminal FR.');
-                speakMalay('Wajah rujukan berjaya disimpan dan disegerakkan.');
+                setStatusText('Wajah rujukan aktif & dikemaskini!');
+                setOk('Wajah rujukan berjaya disimpan dan dikemaskini untuk Terminal FR.');
+                speakMalay('Wajah rujukan berjaya disimpan dan dikemaskini.');
               } catch (e) {
                 setErr(`Ralat semasa menyimpan wajah rujukan: ${e.message}`);
               } finally {
@@ -3260,7 +3260,7 @@ jobs:
                           {sess?.name || 'Pengguna'}
                         </Text>
                         <Text style={{ fontSize: 11, color: C.mute, marginTop: 2 }}>
-                          No. Staf: {sess?.staff_no || '-'} · {serverSynced ? '☁️ Wajah Disegerak' : '📱 Sedia Imbas'}
+                          No. Staf: {sess?.staff_no || '-'} · {serverSynced ? '☁️ Wajah Dikemaskini' : '📱 Sedia Imbas'}
                         </Text>
                       </View>
                       <Pressable
@@ -3268,7 +3268,7 @@ jobs:
                         disabled={syncingServer}
                         accessible={true}
                         accessibilityRole="button"
-                        accessibilityLabel="Segerakkan wajah dengan storan pelayan"
+                        accessibilityLabel="Kemaskini wajah dengan pelayan"
                         style={{
                           width: 38,
                           height: 38,
@@ -3424,7 +3424,7 @@ jobs:
                           <Btn
                             kind="ghost"
                             icon="☁️"
-                            label="Segerak Pelayan"
+                            label="Kemaskini di Pelayan"
                             onPress={enrollReferenceFace}
                             busy={syncingServer}
                           />
@@ -3459,7 +3459,7 @@ jobs:
                           <Btn
                             kind="ghost"
                             icon="📸"
-                            label="Pratonton Wajah"
+                            label="Semak Wajah"
                             onPress={captureFace}
                           />
                         </View>
