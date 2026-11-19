@@ -634,6 +634,8 @@ jobs:
             const [online, setOnline] = useState(null); const [at, setAt] = useState(''); const [tags, setTags] = useState([]);
             const [photo, setPhoto] = useState(null); const [badPhoto, setBadPhoto] = useState(false);
             const [tagDetails, setTagDetails] = useState([]);
+            const [portalToday, setPortalToday] = useState(null);
+            const dashWebRef = useRef(null);
             
             const [now, setNow] = useState(new Date());
             useEffect(() => {
@@ -654,6 +656,16 @@ jobs:
                 const detailKey = `TAG_DETAILS_${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
                 const detailsStr = await SecureStore.getItemAsync(detailKey);
                 if (detailsStr) setTagDetails(JSON.parse(detailsStr));
+                const syncedTodayStr = await SecureStore.getItemAsync('SYNCED_TODAY_PORTAL').catch(() => null);
+                if (syncedTodayStr) {
+                  try {
+                    const parsedToday = JSON.parse(syncedTodayStr);
+                    if (parsedToday && parsedToday.date === todayStr()) {
+                      setPortalToday(parsedToday);
+                    }
+                  } catch (_) {}
+                }
+                try { dashWebRef.current?.reload(); } catch (_) {}
                 
                 { const p = findPhoto(r); if (p) { setPhoto(p); setBadPhoto(false); } }
                 const sd = r?.staff_data;
@@ -703,22 +715,29 @@ jobs:
             const ms12 = (v) => { const m = /(\d{1,2}):(\d{2})\s*(AM|PM)/i.exec(String(v || '')); if (!m) return null; const d = new Date(); d.setHours((+m[1] % 12) + (/pm/i.test(m[3]) ? 12 : 0), +m[2], 0, 0); return d.getTime(); };
             const tg = [...tags].sort((x, y) => x.t - y.t);
             
-            let firstMs = (hasSrv ? msSrv(data.first_tagging) : null) ?? ms12(data?.msg?.clock_in);
+            const portalInMs = portalToday?.date === todayStr() ? ms12(portalToday.clockIn) : null;
+            const portalOutMs = portalToday?.date === todayStr() ? ms12(portalToday.clockOut) : null;
+
+            let firstMs = (hasSrv ? msSrv(data.first_tagging) : null) ?? ms12(data?.msg?.clock_in) ?? portalInMs;
+            if (portalInMs != null && (firstMs == null || portalInMs < firstMs)) firstMs = portalInMs;
             if (firstMs == null && tg.length) firstMs = tg[0].t;
             const first = firstMs != null ? fromMs(firstMs) : null;
-            const firstM = tg.length ? (tg.find((x) => firstMs == null || Math.abs(x.t - firstMs) <= 300000) || tg[0]).m : '';
+            const firstM = (tg.length ? (tg.find((x) => firstMs == null || Math.abs(x.t - firstMs) <= 300000) || tg[0]).m : '') || (portalToday?.inMethod || '');
             
-            let lastMs = firstMs;
-            const cands = [hasSrv ? msSrv(data.last_tagging) : null, ms12(data?.msg?.clock_out), ...tg.map((x) => x.t)]
+            let lastMs = null;
+            const cands = [hasSrv ? msSrv(data.last_tagging) : null, ms12(data?.msg?.clock_out), portalOutMs, ...tg.map((x) => x.t)]
               .filter((v) => v != null && firstMs != null && v > firstMs);
             if (cands.length) lastMs = Math.max(...cands);
             const last = lastMs != null ? fromMs(lastMs) : null;
-            const lastM = lastMs === firstMs ? firstM : ((tg.find((x) => x.t === lastMs) || {}).m || '');
+            const lastM = lastMs == null
+              ? ''
+              : ((tg.find((x) => x.t === lastMs) || {}).m || (portalOutMs != null && Math.abs(lastMs - portalOutMs) <= 120000 ? (portalToday?.outMethod || '') : ''));
             
             const showTagInfo = (title, isFirst) => {
               const timeVal = isFirst ? first : last;
               const legacyMethod = isFirst ? firstM : lastM;
-              const detail = (isFirst || lastMs === firstMs) ? tagDetails[0] : tagDetails[tagDetails.length - 1];
+              const detail = isFirst ? tagDetails[0] : (tagDetails.length > 1 ? tagDetails[tagDetails.length - 1] : null);
+              const portalLoc = isFirst ? portalToday?.inLocation : portalToday?.outLocation;
               if (!timeVal || timeVal === '—') {
                 Alert.alert(title, "Tiada rekod kehadiran.");
                 return;
@@ -734,10 +753,11 @@ jobs:
                  );
               } else if (legacyMethod) {
                  const methodName = labelOfMethod(legacyMethod);
-                 speakMalay(`${title} pada pukul ${timeVal}, menggunakan kaedah ${methodName}.`);
+                 const locLine = portalLoc ? `Lokasi: ${portalLoc}` : '*Disegerakkan daripada Log Kehadiran portal.*';
+                 speakMalay(`${title} pada pukul ${timeVal}, menggunakan kaedah ${methodName}${portalLoc ? ', di ' + portalLoc : ''}.`);
                  Alert.alert(
                    `Maklumat ${title}`, 
-                   `Kaedah: ${methodName}\nMasa: ${timeVal}\n\n*Lokasi terperinci tidak ditemui untuk sesi ini.*`
+                   `Kaedah: ${methodName}\nMasa: ${timeVal}\n${locLine}`
                  );
               } else {
                  speakMalay(`${title} pada pukul ${timeVal}, direkodkan daripada pelayan web.`);
@@ -867,6 +887,103 @@ jobs:
                 
                 <View style={{ marginTop: 32, marginBottom: 10, alignItems: 'center' }}>
                   <Text style={{ color: C.mute, fontSize: 12, fontWeight: '600' }}>Copyright © 2026 MTIB</Text>
+                </View>
+                <View style={{ height: 0, width: 0, overflow: 'hidden' }} pointerEvents="none">
+                  <WebView
+                    ref={dashWebRef}
+                    source={{ uri: `${PORTAL}?month=${new Date().getMonth() + 1}&year=${new Date().getFullYear()}` }}
+                    injectedJavaScript={`
+                      (function() {
+                        function syncToday() {
+                          try {
+                            var mainTable = document.querySelector('section.content table.table-bordered');
+                            if (!mainTable) return;
+                            var detectMethod = function(el) {
+                              if (!el) return '';
+                              if (el.querySelector('.fa-qrcode')) return 'qr';
+                              if (el.querySelector('.fa-map-marked, .fa-map-marker')) return 'geo';
+                              if (el.querySelector('.fa-user-check, .fa-camera')) return 'fr';
+                              return '';
+                            };
+                            var rows = mainTable.querySelectorAll(':scope > tbody > tr');
+                            var out = [];
+                            for (var i = 0; i < rows.length; i++) {
+                              var cells = rows[i].querySelectorAll(':scope > td');
+                              if (cells.length >= 6) {
+                                var dt = cells[0].innerText.trim();
+                                if (/\d+[-/\.]\d+[-/\.]\d+/.test(dt)) {
+                                  var dayNum = parseInt(dt.split(/[-/\.]/)[0], 10);
+                                  var inM = /(\d{1,2}:\d{2}\s*(?:AM|PM)?)/i.exec(cells[2].innerText.trim());
+                                  var outM = /(\d{1,2}:\d{2}\s*(?:AM|PM)?)/i.exec(cells[3].innerText.trim());
+                                  var txList = [];
+                                  var modal = document.getElementById('view-attendance-log' + dayNum);
+                                  if (modal) {
+                                    var tRows = modal.querySelectorAll('tbody tr');
+                                    for (var j = 0; j < tRows.length; j++) {
+                                      var tc = tRows[j].querySelectorAll('td');
+                                      if (tc.length >= 3) {
+                                        txList.push({
+                                          time: tc[0].innerText.trim(),
+                                          method: detectMethod(tc[1]) || '',
+                                          location: tc[2].innerText.replace(/\s+/g, ' ').trim()
+                                        });
+                                      }
+                                    }
+                                  }
+                                  out.push({
+                                    date: dt,
+                                    clockIn: inM ? inM[1] : '',
+                                    inMethod: detectMethod(cells[2]),
+                                    clockOut: outM ? outM[1] : '',
+                                    outMethod: detectMethod(cells[3]),
+                                    transactions: txList
+                                  });
+                                }
+                              }
+                            }
+                            if (out.length > 0 && window.ReactNativeWebView) {
+                              window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'DASH_SYNC', rows: out }));
+                            }
+                          } catch (e) {}
+                        }
+                        syncToday();
+                        setTimeout(syncToday, 1500);
+                      })();
+                      true;
+                    `}
+                    onMessage={async (ev) => {
+                      try {
+                        const msg = JSON.parse(ev.nativeEvent.data);
+                        if (msg.type === 'DASH_SYNC' && Array.isArray(msg.rows)) {
+                          const dNow = new Date();
+                          const pats = [
+                            `${dNow.getDate()}-${dNow.getMonth() + 1}-${dNow.getFullYear()}`,
+                            `${pad(dNow.getDate())}-${pad(dNow.getMonth() + 1)}-${dNow.getFullYear()}`,
+                            `${pad(dNow.getDate())}/${pad(dNow.getMonth() + 1)}/${dNow.getFullYear()}`,
+                          ];
+                          const tr = msg.rows.find((r) => pats.includes(String(r.date || '').trim()));
+                          if (tr) {
+                            const lastTx = Array.isArray(tr.transactions) && tr.transactions.length > 0 ? tr.transactions[tr.transactions.length - 1] : null;
+                            const syncedObj = {
+                              date: todayStr(),
+                              clockIn: tr.clockIn || '',
+                              clockOut: tr.clockOut || (lastTx ? lastTx.time : ''),
+                              inMethod: tr.inMethod || (tr.transactions?.[0]?.method || ''),
+                              outMethod: tr.outMethod || (lastTx?.method || ''),
+                              inLocation: tr.transactions?.[0]?.location || '',
+                              outLocation: lastTx?.location || '',
+                            };
+                            setPortalToday(syncedObj);
+                            await SecureStore.setItemAsync('SYNCED_TODAY_PORTAL', JSON.stringify(syncedObj)).catch(() => {});
+                          }
+                        }
+                      } catch (_) {}
+                    }}
+                    javaScriptEnabled={true}
+                    domStorageEnabled={true}
+                    sharedCookiesEnabled={true}
+                    thirdPartyCookiesEnabled={true}
+                  />
                 </View>
               </ScrollView>
             );
@@ -1065,9 +1182,23 @@ jobs:
                       };
                       const pInMs = parse12ToMs(todayRow.clockIn);
                       const pOutMs = parse12ToMs(todayRow.clockOut);
+                      const lastTx = Array.isArray(todayRow.transactions) && todayRow.transactions.length > 0
+                        ? todayRow.transactions[todayRow.transactions.length - 1]
+                        : null;
+                      const lastTxMs = lastTx ? parse12ToMs(lastTx.time) : null;
+                      const effectiveOutMs = pOutMs || (lastTxMs && pInMs && lastTxMs > pInMs ? lastTxMs : null);
                       await SecureStore.setItemAsync('WBF_TODAY_DATE', todayStr()).catch(() => {});
                       if (pInMs) await SecureStore.setItemAsync('WBF_TODAY_FIRST_MS', String(pInMs)).catch(() => {});
-                      if (pOutMs) await SecureStore.setItemAsync('WBF_TODAY_LAST_MS', String(pOutMs)).catch(() => {});
+                      if (effectiveOutMs) await SecureStore.setItemAsync('WBF_TODAY_LAST_MS', String(effectiveOutMs)).catch(() => {});
+                      await SecureStore.setItemAsync('SYNCED_TODAY_PORTAL', JSON.stringify({
+                        date: todayStr(),
+                        clockIn: todayRow.clockIn || '',
+                        clockOut: todayRow.clockOut || (lastTx && effectiveOutMs ? lastTx.time : ''),
+                        inMethod: todayRow.inMethod || (todayRow.transactions?.[0]?.method || ''),
+                        outMethod: todayRow.outMethod || (lastTx?.method || ''),
+                        inLocation: todayRow.transactions?.[0]?.location || '',
+                        outLocation: lastTx?.location || '',
+                      })).catch(() => {});
                       await syncWbfReminders({
                         firstMs: pInMs || undefined,
                         lastMs: pOutMs || undefined,
@@ -2764,6 +2895,17 @@ jobs:
               }
             };
 
+            const [askFrPwd, setAskFrPwd] = useState(false);
+            const [frUnlocked, setFrUnlocked] = useState(false);
+            const [frPwd, setFrPwd] = useState('');
+            const [customEpInput, setCustomEpInput] = useState('');
+            const [frTabletImei, setFrTabletImei] = useState('');
+
+            useEffect(() => {
+              SecureStore.getItemAsync('FR_CUSTOM_ENDPOINT').then((v) => { if (v) setCustomEpInput(v); }).catch(() => {});
+              SecureStore.getItemAsync('FR_TABLET_IMEI').then((v) => { if (v) setFrTabletImei(v); }).catch(() => {});
+            }, []);
+
             if (!perm?.granted) {
               return (
                 <View style={{ flex: 1 }}>
@@ -2775,17 +2917,6 @@ jobs:
                 </View>
               );
             }
-
-            const [askFrPwd, setAskFrPwd] = useState(false);
-            const [frUnlocked, setFrUnlocked] = useState(false);
-            const [frPwd, setFrPwd] = useState('');
-            const [customEpInput, setCustomEpInput] = useState('');
-            const [frTabletImei, setFrTabletImei] = useState('');
-
-            useEffect(() => {
-              SecureStore.getItemAsync('FR_CUSTOM_ENDPOINT').then((v) => { if (v) setCustomEpInput(v); }).catch(() => {});
-              SecureStore.getItemAsync('FR_TABLET_IMEI').then((v) => { if (v) setFrTabletImei(v); }).catch(() => {});
-            }, []);
 
             return (
               <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 32 }}>
@@ -3801,7 +3932,7 @@ jobs:
         with:
           tag_name: "v1.1.0-${{ github.run_number }}"
           name: "iHR APK Build v1.1.0 #${{ github.run_number }}"
-          body: "iHR APK v1.1.0: OKU Blind Voice & Hands-Free Face Recognition (FR), Server-Linked WBF Reminders, Direct In-App PDF Download, Native Vibration & Haptics, 5 Color Themes, and Admin QR Generator."
+          body: "iHR APK v1.1.0: OKU Blind Voice & Hands-Free Face Recognition (FR), Server-Linked WBF Reminders, Direct In-App PDF Download, Native Vibration & Haptics, 5 Color Themes :malaysia: :good:."
           draft: false
           prerelease: false
           files: app/android/app/build/outputs/apk/release/*.apk
