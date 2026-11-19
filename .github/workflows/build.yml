@@ -405,7 +405,7 @@ jobs:
                   address = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
                 }
               } else {
-                address = 'Koordinat GPS tidak tersedia';
+                address = method === 'fr' ? 'Pengecaman Wajah (Tanpa Lokasi GPS)' : 'Koordinat GPS tidak tersedia';
               }
               
               cur.push({ t: Date.now(), m: method, lat, lng, address });
@@ -2458,9 +2458,10 @@ jobs:
             const { C, s } = useT();
             const [perm, ask] = useCameraPermissions();
             const ref = useRef(null);
-            const loc = useFix();
             const [shot, setShot] = useState(null);
             const [refFace, setRefFace] = useState(null);
+            const [serverSynced, setServerSynced] = useState(false);
+            const [syncingServer, setSyncingServer] = useState(false);
             const [countdown, setCountdown] = useState(null);
             const [autoSubmitAfterCountdown, setAutoSubmitAfterCountdown] = useState(false);
             const [okuAutoEnabled, setOkuAutoEnabled] = useState(false);
@@ -2472,6 +2473,35 @@ jobs:
             const [statusText, setStatusText] = useState('Letakkan wajah anda di dalam bingkai bujur');
 
             const refKey = `FACE_REF_${sess?.staff_no || 'DEFAULT'}`;
+            const syncFlagKey = `FACE_SRV_SYNCED_${sess?.staff_no || 'DEFAULT'}`;
+
+            const syncFromServerStorage = useCallback(async (silent = true) => {
+              if (!sess?.staff_no) return;
+              if (!silent) setSyncingServer(true);
+              try {
+                const dashRes = await call(EP.dashboard, { staff_no: sess.staff_no, staff_id: sess.staff_id });
+                const srvPhoto = findPhoto(dashRes);
+                if (srvPhoto) {
+                  setRefFace(srvPhoto);
+                  setServerSynced(true);
+                  await SecureStore.setItemAsync(refKey, srvPhoto).catch(() => {});
+                  await SecureStore.setItemAsync(syncFlagKey, 'true').catch(() => {});
+                  if (!silent) {
+                    triggerVibrate(true);
+                    setOk('Wajah rujukan berjaya disegerakkan daripada storan pelayan iHR.');
+                  }
+                } else if (!silent) {
+                  Alert.alert(
+                    'Storan Wajah Pelayan',
+                    'Tiada gambar wajah ditemui di pelayan lagi. Sila ambil gambar wajah anda dan tekan "Simpan & Segerak Pelayan" untuk memuat naik ke storan pelayan.'
+                  );
+                }
+              } catch (e) {
+                if (!silent) setErr(`Gagal menyegerakkan dengan pelayan: ${e.message}`);
+              } finally {
+                if (!silent) setSyncingServer(false);
+              }
+            }, [sess?.staff_no, sess?.staff_id, refKey, syncFlagKey]);
 
             useEffect(() => {
               if (perm && !perm.granted) {
@@ -2484,7 +2514,9 @@ jobs:
               let on = true;
               (async () => {
                 const saved = await SecureStore.getItemAsync(refKey).catch(() => null);
+                const wasSynced = await SecureStore.getItemAsync(syncFlagKey).catch(() => null);
                 if (saved && on) setRefFace(saved);
+                if (wasSynced === 'true' && on) setServerSynced(true);
                 const voicePref = await SecureStore.getItemAsync('OKU_VOICE_ENABLED').catch(() => null);
                 if (on) setOkuVoiceLocal(voicePref === 'true');
                 const autoPref = await SecureStore.getItemAsync('OKU_AUTO_SCAN_FR').catch(() => null);
@@ -2495,22 +2527,23 @@ jobs:
                 } else {
                   speakMalay('Skrin pengecaman wajah dibuka. Halakan kamera hadapan ke wajah anda, kemudian tekan butang imbas dan rekod wajah sekarang.');
                 }
+                await syncFromServerStorage(true);
               })();
               return () => {
                 on = false;
                 try { Speech.stop(); } catch (_) {}
               };
-            }, [refKey]);
+            }, [refKey, syncFlagKey, syncFromServerStorage]);
 
-            // Jika Mod Auto-Imbas OKU aktif, mulakan kiraan 3 saat & auto-hantar sebaik sahaja kamera + GPS sedia
+            // Jika Mod Auto-Imbas OKU aktif, mulakan kiraan 3 saat & auto-hantar sebaik sahaja kamera sedia (tanpa GPS)
             useEffect(() => {
               if (!okuAutoEnabled || autoTriggeredRef.current) return;
-              if (!perm?.granted || !loc.fix || shot || busy || ok) return;
+              if (!perm?.granted || shot || busy || ok) return;
               autoTriggeredRef.current = true;
               setAutoSubmitAfterCountdown(true);
               setCountdown(3);
               setStatusText('Mod Bebas Tangan: Mengimbas & merekod dalam 3 saat…');
-            }, [okuAutoEnabled, perm?.granted, loc.fix, shot, busy, ok]);
+            }, [okuAutoEnabled, perm?.granted, shot, busy, ok]);
 
             const captureFace = useCallback(async () => {
               try {
@@ -2529,7 +2562,7 @@ jobs:
                 );
                 setShot(resized);
                 triggerVibrate(false);
-                setStatusText('Wajah dirakam! Sedia untuk pengesahan & rekod.');
+                setStatusText('Wajah dirakam! Sedia untuk pengesahan & segerak pelayan.');
                 return resized;
               } catch (e) {
                 setErr(e.message || 'Ralat kamera semasa merakam wajah.');
@@ -2561,14 +2594,77 @@ jobs:
               return () => clearTimeout(timer);
             }, [countdown, autoSubmitAfterCountdown, captureFace]);
 
+            const uploadFaceToServerStorage = async (base64Img) => {
+              const enrollPayload = {
+                staff_id: sess.staff_id,
+                staff_no: sess.staff_no,
+                imei: String(deviceId()),
+                method: 'fr',
+                is_enroll: 1,
+                img: base64Img,
+                face_image: base64Img,
+                photo: base64Img,
+              };
+              try {
+                await call(EP.frEnroll, enrollPayload);
+                return true;
+              } catch (_) {
+                try {
+                  await call(EP.frEnrollAlt, enrollPayload);
+                  return true;
+                } catch (_2) {
+                  return false;
+                }
+              }
+            };
+
             const enrollReferenceFace = async () => {
+              if (!sess?.staff_id) {
+                return setErr('ID staff belum dimuatkan. Kembali ke Dashboard dan tunggu data dimuat.');
+              }
               const target = shot || (await captureFace());
               if (!target?.base64) return;
-              const dataUri = `data:image/jpeg;base64,${target.base64}`;
-              await SecureStore.setItemAsync(refKey, dataUri).catch(() => {});
-              setRefFace(dataUri);
-              triggerVibrate(true);
-              Alert.alert('Wajah Rujukan Disimpan', 'Wajah rujukan anda telah disimpan untuk pengesahan kehadiran pantas.');
+              setSyncingServer(true);
+              setErr('');
+              setOk('');
+              setStatusText('Menyimpan & menyegerakkan wajah ke storan pelayan iHR…');
+              try {
+                const dataUri = `data:image/jpeg;base64,${target.base64}`;
+                await SecureStore.setItemAsync(refKey, dataUri).catch(() => {});
+                setRefFace(dataUri);
+
+                const uploaded = await uploadFaceToServerStorage(target.base64);
+                if (!uploaded) {
+                  // Segerakkan melalui laluan rekod FR pelayan supaya gambar wajah tersimpan dalam storan pelayan
+                  await call(EP.fr, {
+                    staff_id: sess.staff_id,
+                    staff_no: sess.staff_no,
+                    method: 'fr',
+                    activity_type: 1,
+                    img: target.base64,
+                  }).catch(async () => {
+                    await call(EP.geotag, {
+                      staff_id: sess.staff_id,
+                      staff_no: sess.staff_no,
+                      method: 'fr',
+                      activity_type: 1,
+                      img: target.base64,
+                    });
+                  });
+                }
+
+                setServerSynced(true);
+                await SecureStore.setItemAsync(syncFlagKey, 'true').catch(() => {});
+                await syncFromServerStorage(true);
+                triggerVibrate(true);
+                setStatusText('Wajah berjaya disegerakkan ke storan pelayan!');
+                setOk('Wajah rujukan telah disimpan dan disegerakkan ke storan Pengecaman Wajah pelayan iHR.');
+                speakMalay('Wajah rujukan berjaya disimpan dan disegerakkan ke pelayan.');
+              } catch (e) {
+                setErr(`Wajah disimpan pada peranti, tetapi gagal muat naik ke pelayan: ${e.message}`);
+              } finally {
+                setSyncingServer(false);
+              }
             };
 
             const submitFaceAttendance = async (capturedOverride = null) => {
@@ -2579,56 +2675,77 @@ jobs:
               if (!target?.base64) {
                 return setErr('Sila imbas atau ambil gambar wajah terlebih dahulu.');
               }
-              if (!loc.fix) {
-                return setErr('Lokasi GPS belum dikesan. Sila tunggu sebentar atau tekan Kesan semula.');
-              }
 
               setBusy(true);
               setErr('');
               setOk('');
-              setStatusText('Mengesahkan wajah dengan pelayan iHR…');
+              setStatusText('Mengesahkan & menyegerakkan wajah dengan pelayan iHR…');
+
+              const savedTabletImei = await SecureStore.getItemAsync('FR_TABLET_IMEI').catch(() => null);
+              const customFrPath = await SecureStore.getItemAsync('FR_CUSTOM_ENDPOINT').catch(() => null);
 
               const payload = {
                 staff_id: sess.staff_id,
                 staff_no: sess.staff_no,
+                imei: String(deviceId()),
+                tablet_imei: savedTabletImei || undefined,
+                device_imei: savedTabletImei || undefined,
+                type: 'fr',
                 method: 'fr',
-                activity_type: 1,
-                latitude: loc.fix.latitude,
-                longitude: loc.fix.longitude,
+                attendance_type: 'fr',
+                tag_type: 'fr',
                 img: target.base64,
+                face_image: target.base64,
               };
+
+              const candidateEps = [
+                ...(customFrPath ? [{ path: customFrPath.replace(/^\/+/, ''), method: 'POST', code: 'F', retry: true, jsonFirst: true }] : []),
+                EP.fr,
+                EP.fr2,
+                EP.fr3,
+                EP.fr4,
+                EP.fr5,
+                EP.fr6,
+                EP.frAlt,
+              ];
 
               try {
                 let res = null;
-                try {
-                  res = await call(EP.fr, payload);
-                } catch (e1) {
-                  if (String(e1.message || '').includes('[F001]') || String(e1.message || '').includes('HTTP 404')) {
-                    try {
-                      res = await call(EP.frAlt, payload);
-                    } catch (e2) {
-                      if (String(e2.message || '').includes('[F001]') || String(e2.message || '').includes('HTTP 404')) {
-                        res = await call(EP.geotag, payload);
-                      } else {
-                        throw e2;
-                      }
+                let lastErr = null;
+                for (let i = 0; i < candidateEps.length; i++) {
+                  try {
+                    res = await call(candidateEps[i], payload);
+                    lastErr = null;
+                    break;
+                  } catch (eTry) {
+                    lastErr = eTry;
+                    const msg = String(eTry?.message || '');
+                    if (msg.includes('[F001]') || msg.includes('HTTP 404')) {
+                      continue;
                     }
-                  } else {
-                    throw e1;
+                    throw eTry;
                   }
                 }
+                if (lastErr) {
+                  throw new Error('Laluan API FR pelayan tidak ditemui (HTTP 404). Jangan guna fallback Geotag supaya simbol FR (fa-user-check) dikekalkan. Tekan lama tajuk "Pengecaman Wajah (FR)" untuk tetapan laluan API FR pelayan.');
+                }
+
+                // Pastikan gambar wajah turut disegerakkan ke storan FR pelayan
+                uploadFaceToServerStorage(target.base64).catch(() => {});
 
                 await addLocalTag('fr');
-                await saveTagDetails('fr', loc.fix.latitude, loc.fix.longitude);
+                await saveTagDetails('fr', null, null);
+                const dataUri = `data:image/jpeg;base64,${target.base64}`;
                 if (!refFace) {
-                  const dataUri = `data:image/jpeg;base64,${target.base64}`;
                   await SecureStore.setItemAsync(refKey, dataUri).catch(() => {});
                   setRefFace(dataUri);
                 }
+                setServerSynced(true);
+                await SecureStore.setItemAsync(syncFlagKey, 'true').catch(() => {});
                 triggerVibrate(true);
                 const nowTimeSpoken = fromMs(Date.now());
-                setStatusText('Pengecaman wajah disahkan!');
-                const okMsg = typeof res === 'string' ? res : (res?.message || 'Kehadiran Pengecaman Wajah (FR) berjaya direkodkan.');
+                setStatusText('Pengecaman wajah disahkan & disegerakkan!');
+                const okMsg = typeof res === 'string' ? res : (res?.message || 'Kehadiran Pengecaman Wajah (FR) berjaya direkodkan dengan simbol FR.');
                 setOk(okMsg);
                 speakMalay(`Berjaya! Kehadiran pengecaman wajah anda telah direkodkan pada pukul ${nowTimeSpoken}.`);
               } catch (e) {
@@ -2659,25 +2776,95 @@ jobs:
               );
             }
 
+            const [askFrPwd, setAskFrPwd] = useState(false);
+            const [frUnlocked, setFrUnlocked] = useState(false);
+            const [frPwd, setFrPwd] = useState('');
+            const [customEpInput, setCustomEpInput] = useState('');
+            const [frTabletImei, setFrTabletImei] = useState('');
+
+            useEffect(() => {
+              SecureStore.getItemAsync('FR_CUSTOM_ENDPOINT').then((v) => { if (v) setCustomEpInput(v); }).catch(() => {});
+              SecureStore.getItemAsync('FR_TABLET_IMEI').then((v) => { if (v) setFrTabletImei(v); }).catch(() => {});
+            }, []);
+
             return (
               <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 32 }}>
-                <Top title="Pengecaman Wajah (FR)" onBack={back} />
+                <Top title="Pengecaman Wajah (FR)" onBack={back} onTitleLongPress={() => setAskFrPwd(!askFrPwd)} />
+                {askFrPwd && !frUnlocked && (
+                  <View style={{ padding: 16, gap: 10 }}>
+                    <TextInput
+                      style={s.in}
+                      secureTextEntry
+                      placeholder="Kata laluan admin"
+                      placeholderTextColor={C.mute}
+                      value={frPwd}
+                      onChangeText={(t) => {
+                        setFrPwd(t);
+                        if (t.trim() === 'Mtib@123') { setFrUnlocked(true); setAskFrPwd(false); setFrPwd(''); }
+                      }}
+                    />
+                  </View>
+                )}
+                {frUnlocked && (
+                  <View style={{ padding: 16, gap: 10 }}>
+                    <Card title="Tetapan API FR Pelayan (Admin)" icon="⚙️" tint={C.primary}>
+                      <Text style={s.lbl}>Laluan API FR Laravel (cth: api/fr_scanner):</Text>
+                      <TextInput
+                        style={s.in}
+                        value={customEpInput}
+                        onChangeText={setCustomEpInput}
+                        placeholder="api/fr_scanner"
+                        placeholderTextColor={C.mute}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                      />
+                      <Text style={[s.lbl, { marginTop: 10 }]}>IMEI Peranti FR (cth: Menara PGRM 1 - Tingkat 17):</Text>
+                      <TextInput
+                        style={s.in}
+                        value={frTabletImei}
+                        onChangeText={setFrTabletImei}
+                        placeholder="IMEI dari attendance_devices"
+                        placeholderTextColor={C.mute}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                      />
+                      <View style={{ marginTop: 10 }}>
+                        <Btn
+                          icon="💾"
+                          label="Simpan Tetapan FR"
+                          onPress={async () => {
+                            if (customEpInput.trim()) await SecureStore.setItemAsync('FR_CUSTOM_ENDPOINT', customEpInput.trim());
+                            else await SecureStore.deleteItemAsync('FR_CUSTOM_ENDPOINT');
+                            if (frTabletImei.trim()) await SecureStore.setItemAsync('FR_TABLET_IMEI', frTabletImei.trim());
+                            else await SecureStore.deleteItemAsync('FR_TABLET_IMEI');
+                            triggerVibrate(true);
+                            Alert.alert('Disimpan', 'Tetapan API FR & IMEI peranti telah disimpan.');
+                          }}
+                        />
+                      </View>
+                    </Card>
+                  </View>
+                )}
                 <View style={{ padding: 16, gap: 14 }}>
                   <Card>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                       <View style={{
                         width: 52,
                         height: 52,
                         borderRadius: 26,
                         backgroundColor: C.primarySoft || '#F8E5E1',
                         borderWidth: 2,
-                        borderColor: refFace ? C.ok : C.primary,
+                        borderColor: serverSynced ? C.ok : refFace ? C.accent : C.primary,
                         alignItems: 'center',
                         justifyContent: 'center',
                         overflow: 'hidden',
                       }}>
                         {refFace ? (
-                          <Image source={{ uri: refFace }} style={{ width: '100%', height: '100%' }} resizeMode="cover" />
+                          <Image
+                            source={refFace.startsWith('data:') ? { uri: refFace } : { uri: refFace, headers: { imei: String(deviceId()) } }}
+                            style={{ width: '100%', height: '100%' }}
+                            resizeMode="cover"
+                          />
                         ) : (
                           <MaterialIcons name="face" size={28} color={C.primary} />
                         )}
@@ -2686,10 +2873,33 @@ jobs:
                         <Text style={{ fontSize: 15, fontWeight: '800', color: C.ink }} numberOfLines={1}>
                           {sess?.name || 'Pengguna'}
                         </Text>
-                        <Text style={{ fontSize: 12, color: C.mute, marginTop: 2 }}>
-                          No. Staf: {sess?.staff_no || '-'} · {refFace ? '✅ Wajah Rujukan Aktif' : 'ℹ️ Belum Daftar Wajah Rujukan'}
+                        <Text style={{ fontSize: 11, color: C.mute, marginTop: 2 }}>
+                          No. Staf: {sess?.staff_no || '-'} · {serverSynced ? '☁️ Segerak Storan Pelayan' : refFace ? '📱 Wajah Rujukan Lokal' : 'ℹ️ Belum Daftar Wajah'}
                         </Text>
                       </View>
+                      <Pressable
+                        onPress={() => syncFromServerStorage(false)}
+                        disabled={syncingServer}
+                        accessible={true}
+                        accessibilityRole="button"
+                        accessibilityLabel="Segerakkan wajah dengan storan pelayan"
+                        style={{
+                          width: 38,
+                          height: 38,
+                          borderRadius: 19,
+                          backgroundColor: C.field,
+                          borderWidth: 1,
+                          borderColor: C.line,
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        {syncingServer ? (
+                          <ActivityIndicator size="small" color={C.primary} />
+                        ) : (
+                          <MaterialIcons name="cloud-sync" size={20} color={C.primary} />
+                        )}
+                      </Pressable>
                       <Pressable
                         onPress={async () => {
                           const cur = await SecureStore.getItemAsync('OKU_VOICE_ENABLED').catch(() => null);
@@ -2704,9 +2914,9 @@ jobs:
                         accessibilityRole="button"
                         accessibilityLabel={okuVoiceLocal ? 'Matikan panduan suara' : 'Aktifkan panduan suara'}
                         style={{
-                          width: 40,
-                          height: 40,
-                          borderRadius: 20,
+                          width: 38,
+                          height: 38,
+                          borderRadius: 19,
                           backgroundColor: okuVoiceLocal ? C.primary : C.field,
                           borderWidth: 1,
                           borderColor: okuVoiceLocal ? C.primary : C.line,
@@ -2796,9 +3006,10 @@ jobs:
                         <View style={{ flex: 1 }}>
                           <Btn
                             kind="ghost"
-                            icon="💾"
-                            label="Simpan Rujukan"
+                            icon="☁️"
+                            label="Segerak Pelayan"
                             onPress={enrollReferenceFace}
+                            busy={syncingServer}
                           />
                         </View>
                       </View>
@@ -2841,7 +3052,6 @@ jobs:
 
                   <Err msg={err} />
                   <Ok msg={ok} />
-                  <Loc {...loc} />
                 </View>
               </ScrollView>
             );
@@ -3271,8 +3481,15 @@ jobs:
           dashboard: { path: 'api/dashboard',         method: 'POST', code: 'D', flip: true, retry: true },
           geotag:    { path: 'api/geotagging',        method: 'POST', code: 'G', retry: true, jsonFirst: true },
           qr:        { path: 'api/qr_scanner',        method: 'POST', code: 'Q', retry: true },
-          fr:        { path: 'api/face_recognition',  method: 'POST', code: 'F', retry: true, jsonFirst: true },
+          fr:        { path: 'api/fr_scanner',        method: 'POST', code: 'F', retry: true, jsonFirst: true },
+          fr2:       { path: 'api/facial_recognition',method: 'POST', code: 'F', retry: true, jsonFirst: true },
+          fr3:       { path: 'api/face_scanner',      method: 'POST', code: 'F', retry: true, jsonFirst: true },
+          fr4:       { path: 'api/face_attendance',   method: 'POST', code: 'F', retry: true, jsonFirst: true },
+          fr5:       { path: 'api/fr_attendance',     method: 'POST', code: 'F', retry: true, jsonFirst: true },
+          fr6:       { path: 'api/face_recognition',  method: 'POST', code: 'F', retry: true, jsonFirst: true },
           frAlt:     { path: 'api/fr',                method: 'POST', code: 'F', retry: true, jsonFirst: true },
+          frEnroll:  { path: 'api/face_registration', method: 'POST', code: 'F', retry: true, jsonFirst: true },
+          frEnrollAlt:{ path: 'api/save_face',        method: 'POST', code: 'F', retry: true, jsonFirst: true },
           mia:       { path: 'api/mia_report',        method: 'POST', code: 'M', retry: true },
           reason:    { path: 'api/reason',            method: 'POST', code: 'P', flip: true, retry: true },
           reference: { path: 'api/reference',         method: 'GET',  code: 'P', flip: true, retry: true },
@@ -3375,7 +3592,7 @@ jobs:
             return out;
           }
           export const unwrap = (r) => (r && (r.data ?? r.staff_data ?? r.result)) ?? r;
-          const PHOTO_KEY = /(photo|image|img|picture|pic|avatar|gambar|foto|profile)/i;
+          const PHOTO_KEY = /(face|wajah|photo|image|img|picture|pic|avatar|gambar|foto|profile)/i;
           const NOT_PHOTO = /(color|colour|type|count|msg|status|path_id)/i;
           function toUri(v) {
             const s = String(v).trim();
