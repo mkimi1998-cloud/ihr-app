@@ -803,7 +803,7 @@ jobs:
                  );
               } else if (legacyMethod) {
                  const methodName = labelOfMethod(legacyMethod);
-                 const locLine = portalLoc ? `Lokasi: ${portalLoc}` : '*Disegerakkan daripada Log Kehadiran portal.*';
+                 const locLine = portalLoc ? `Lokasi: ${portalLoc}` : '*Dikemaskini daripada Log Kehadiran portal.*';
                  speakMalay(`${title} pada pukul ${timeVal}, menggunakan kaedah ${methodName}${portalLoc ? ', di ' + portalLoc : ''}.`);
                  Alert.alert(
                    `Maklumat ${title}`, 
@@ -849,7 +849,7 @@ jobs:
                     <View style={{ backgroundColor: '#fff', borderRadius: 8, padding: 2 }}>
                        <Image source={require('./assets/icon.png')} style={{ width: 32, height: 32 }} resizeMode="contain" />
                     </View>
-                    <Text numberOfLines={1} adjustsFontSizeToFit style={{ flex: 1, color: C.ink, fontSize: 24, fontWeight: '800', letterSpacing: 0.3 }}>iHR Kehadiran</Text>
+                    <Text numberOfLines={1} adjustsFontSizeToFit style={{ flex: 1, color: C.ink, fontSize: 22, fontWeight: '800', letterSpacing: 0.3 }}>iHR Kehadiran</Text>
                   </View>
                   <View style={{ alignItems: 'flex-end', flexShrink: 0, gap: 6 }}>
                     <Pressable onPress={handleLogout} style={s.status}>
@@ -857,14 +857,47 @@ jobs:
                       <Text style={s.statusT}>{online == null ? 'Menyemak…' : online ? `Online` : 'Offline'}</Text>
                     </Pressable>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <Pressable onPress={() => changeTheme(themeMode === 'dark' ? 'light' : 'dark')} hitSlop={10} style={{ width: 32, height: 32, alignItems: 'center', justifyContent: 'center', backgroundColor: C.field, borderRadius: 16, borderWidth: 1, borderColor: C.line }}>
+                      <Pressable
+                        onPress={() => go('history')}
+                        hitSlop={10}
+                        accessible={true}
+                        accessibilityRole="button"
+                        accessibilityLabel="Log Kehadiran"
+                        style={{ width: 32, height: 32, alignItems: 'center', justifyContent: 'center', backgroundColor: C.field, borderRadius: 16, borderWidth: 1, borderColor: C.line }}
+                      >
+                        <MaterialIcons name="access-time" size={16} color={C.primaryText} />
+                      </Pressable>
+                      <Pressable
+                        onPress={() => go('profile')}
+                        hitSlop={10}
+                        accessible={true}
+                        accessibilityRole="button"
+                        accessibilityLabel="Profil"
+                        style={{ width: 32, height: 32, alignItems: 'center', justifyContent: 'center', backgroundColor: C.field, borderRadius: 16, borderWidth: 1, borderColor: C.line }}
+                      >
+                        <MaterialIcons name="person-outline" size={16} color={C.primaryText} />
+                      </Pressable>
+                      <Pressable
+                        onPress={() => changeTheme(themeMode === 'dark' ? 'light' : 'dark')}
+                        hitSlop={10}
+                        accessible={true}
+                        accessibilityRole="button"
+                        accessibilityLabel="Tukar Tema"
+                        style={{ width: 32, height: 32, alignItems: 'center', justifyContent: 'center', backgroundColor: C.field, borderRadius: 16, borderWidth: 1, borderColor: C.line }}
+                      >
                         <MaterialIcons name={themeMode === 'dark' ? 'light-mode' : 'dark-mode'} size={16} color={C.primaryText} />
                       </Pressable>
-                      <Pressable onPress={load} disabled={busy} hitSlop={10} style={{ height: 32, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', backgroundColor: C.field, borderRadius: 16, borderWidth: 1, borderColor: C.line }}>
+                      <Pressable
+                        onPress={load}
+                        disabled={busy}
+                        hitSlop={10}
+                        accessible={true}
+                        accessibilityRole="button"
+                        accessibilityLabel="Segar Semula"
+                        style={{ width: 32, height: 32, alignItems: 'center', justifyContent: 'center', backgroundColor: C.field, borderRadius: 16, borderWidth: 1, borderColor: C.line }}
+                      >
                         {busy ? <ActivityIndicator size="small" color={C.primaryText} /> : (
-                          <>
-                            <MaterialIcons name="sync" size={15} color={C.primaryText} />
-                          </>
+                          <MaterialIcons name="sync" size={16} color={C.primaryText} />
                         )}
                       </Pressable>
                     </View>
@@ -888,8 +921,24 @@ jobs:
                     <Text style={{ color: C.mute, fontSize: 16, fontWeight: '700', marginBottom: 4 }}>{greeting},</Text>
                     {wrapName(name).map((l, i) => <Text key={i} style={s.pName} numberOfLines={1}>{l}</Text>)}
                   </View>
-                  <View style={s.chips}>
+                  <View style={[s.chips, { flexWrap: 'wrap', justifyContent: 'center' }]}>
                     <View style={s.chip}><Text style={s.chipT}>No. staff {sd.staff_no ?? sess.staff_no}</Text></View>
+                    <Pressable
+                      onPress={() => go('profile')}
+                      accessible={true}
+                      accessibilityRole="button"
+                      accessibilityLabel="Peringatan WBF dan Notifikasi"
+                      style={[s.chip, { flexDirection: 'row', alignItems: 'center', gap: 5 }]}
+                    >
+                      <MaterialIcons name="notifications-active" size={14} color={C.primary} />
+                      <Text style={[s.chipT, { color: C.ink, fontWeight: '700' }]}>
+                        {wbfHasOut
+                          ? `WBF Selesai (${last})`
+                          : wbfTargetOutStr
+                            ? `WBF Pulang: ${wbfTargetOutStr}`
+                            : 'WBF: 7:30 – 9:00 PG'}
+                      </Text>
+                    </Pressable>
                   </View>
                   {data ? <View style={[s.pill, { display: 'none' }]}><Text style={s.pillT}>{data.msg?.clock_in || 'Belum ada rekod waktu masuk hari ini.'}</Text></View> : null}
                 </View>
@@ -898,36 +947,6 @@ jobs:
                   <View style={s.statRow}>
                     <Stat icon="📍" label="Waktu Masuk" value={first || '—'} tint={C.primary} methodIcon={firstM ? getMethodIcon(firstM) : null} onPress={() => showTagInfo('Waktu Masuk', true)} />
                     <Stat icon="📌" label="Waktu Keluar" value={last || '—'} tint={C.navy} methodIcon={lastM ? getMethodIcon(lastM) : null} onPress={() => showTagInfo('Waktu Keluar', false)} />
-                  </View>
-                  <View style={{
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    backgroundColor: C.card,
-                    paddingHorizontal: 14,
-                    paddingVertical: 10,
-                    borderRadius: 14,
-                    borderWidth: 1,
-                    borderColor: C.line,
-                  }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
-                      <MaterialIcons name="schedule" size={18} color={C.primary} />
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ fontSize: 11, fontWeight: '700', color: C.mute }}>
-                          WBF (7:30 PG – 9:00 PG · 4:30 PTG – 6:00 PTG)
-                        </Text>
-                        <Text style={{ fontSize: 12, fontWeight: '800', color: C.ink, marginTop: 1 }}>
-                          {wbfHasOut
-                            ? `Selesai hari ini (Keluar: ${last})`
-                            : wbfTargetOutStr
-                              ? `Sasaran Waktu Pulang: ${wbfTargetOutStr}`
-                              : 'Belum masuk (Sila imbas 7:30 – 9:00 PG)'}
-                        </Text>
-                      </View>
-                    </View>
-                    <Pressable onPress={() => go('profile')} hitSlop={8}>
-                      <MaterialIcons name="notifications-active" size={18} color={C.primary} />
-                    </Pressable>
                   </View>
                   <QuickActionBar go={go} />
                   
@@ -1080,8 +1099,6 @@ jobs:
               { id: 'qr', label: 'Imbas QR', icon: 'qr-code-2', hint: 'Buka pengimbas kod QR kehadiran' },
               { id: 'fr', label: 'Wajah (FR)', icon: 'face', hint: 'Buka pengecaman wajah bebas tangan untuk rekod kehadiran' },
               { id: 'geo', label: 'Geo Tagging', icon: 'location-on', hint: 'Buka kamera swafoto dan lokasi GPS' },
-              { id: 'history', label: 'Log', icon: 'access-time', hint: 'Lihat log kehadiran bulanan' },
-              { id: 'profile', label: 'Profil', icon: 'person-outline', hint: 'Buka tetapan profil, tema, peringatan WBF dan aksesibiliti OKU' },
             ];
             return (
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 2, marginVertical: 6, gap: 4 }}>
@@ -1942,7 +1959,7 @@ jobs:
                   <View style={{ flex: 1 }}>
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 8, backgroundColor: C.field, borderBottomWidth: 1, borderBottomColor: C.line }}>
                       <Text style={{ fontSize: 11, color: rowsList.length > 0 ? '#2E7D4F' : C.mute, fontWeight: '700' }}>
-                        {rowsList.length > 0 ? `✓ ${rowsList.length} hari disegerakkan (${monthNames[selMonth - 1]} ${selYear})` : '🌐 ihr.mtib.gov.my'}
+                        {rowsList.length > 0 ? `✓ ${rowsList.length} hari dikemaskini (${monthNames[selMonth - 1]} ${selYear})` : '🌐 ihr.mtib.gov.my'}
                       </Text>
                       <View style={{ flexDirection: 'row', gap: 8 }}>
                         <Pressable
@@ -2793,12 +2810,12 @@ jobs:
                   await SecureStore.setItemAsync(syncFlagKey, 'true').catch(() => {});
                   if (!silent) {
                     triggerVibrate(true);
-                    setOk('Wajah rujukan berjaya disegerakkan daripada storan pelayan iHR.');
+                    setOk('Wajah rujukan berjaya dikemaskini daripada pelayan iHR.');
                   }
                 } else if (!silent) {
                   Alert.alert(
                     'Storan Wajah Pelayan',
-                    'Tiada gambar wajah ditemui di pelayan lagi. Sila ambil gambar wajah anda dan tekan "Segerak Pelayan".'
+                    'Tiada gambar wajah ditemui di pelayan lagi. Sila ambil gambar wajah anda dan tekan "Kemaskini Pada Pelayan".'
                   );
                 }
               } catch (e) {
@@ -2948,9 +2965,9 @@ jobs:
                 setServerSynced(true);
                 await SecureStore.setItemAsync(syncFlagKey, 'true').catch(() => {});
                 triggerVibrate(true);
-                setStatusText('Wajah rujukan aktif & disegerakkan!');
-                setOk('Wajah rujukan berjaya disimpan dan disegerakkan untuk Terminal FR.');
-                speakMalay('Wajah rujukan berjaya disimpan dan disegerakkan.');
+                setStatusText('Wajah rujukan aktif & dikemaskini!');
+                setOk('Wajah rujukan berjaya disimpan dan dikemaskini untuk Terminal FR.');
+                speakMalay('Wajah rujukan berjaya disimpan dan dikemaskini.');
               } catch (e) {
                 setErr(`Ralat semasa menyimpan wajah rujukan: ${e.message}`);
               } finally {
@@ -3220,7 +3237,7 @@ jobs:
                           {sess?.name || 'Pengguna'}
                         </Text>
                         <Text style={{ fontSize: 11, color: C.mute, marginTop: 2 }}>
-                          No. Staf: {sess?.staff_no || '-'} · {serverSynced ? '☁️ Wajah Disegerak' : '📱 Sedia Imbas'}
+                          No. Staf: {sess?.staff_no || '-'} · {serverSynced ? '☁️ Wajah DiKemaskini' : '📱 Sedia Imbas'}
                         </Text>
                       </View>
                       <Pressable
@@ -3228,7 +3245,7 @@ jobs:
                         disabled={syncingServer}
                         accessible={true}
                         accessibilityRole="button"
-                        accessibilityLabel="Segerakkan wajah dengan storan pelayan"
+                        accessibilityLabel="Kemaskini wajah dengan storan pelayan"
                         style={{
                           width: 38,
                           height: 38,
@@ -3384,7 +3401,7 @@ jobs:
                           <Btn
                             kind="ghost"
                             icon="☁️"
-                            label="Segerak Pelayan"
+                            label="Kemaskini Pada Pelayan"
                             onPress={enrollReferenceFace}
                             busy={syncingServer}
                           />
@@ -4179,7 +4196,7 @@ jobs:
         with:
           tag_name: "v1.1.0-${{ github.run_number }}"
           name: "iHR APK Build v1.1.0 #${{ github.run_number }}"
-          body: "iHR APK v1.1.0: OKU Blind Voice & Hands-Free Face Recognition (FR), Server-Linked WBF Reminders, Direct In-App PDF Download, Native Vibration & Haptics, 5 Color Themes"
+          body: "iHR APK v1.1.0: OKU Blind Voice & Hands-Free Face Recognition (FR), Server-Linked WBF Reminders, Direct In-App PDF Download, Native Vibration & Haptics, 5 Color Themes, and Admin QR Generator."
           draft: false
           prerelease: false
           files: app/android/app/build/outputs/apk/release/*.apk
