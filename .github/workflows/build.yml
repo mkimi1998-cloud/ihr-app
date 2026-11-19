@@ -696,16 +696,22 @@ jobs:
             
             const load = useCallback(async () => {
               setBusy(true); setErr('');
+              const d = new Date();
+              const dashCacheKey = `DASHBOARD_CACHE_${sess.staff_no || 'DEFAULT'}`;
+              const detailKey = `TAG_DETAILS_${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+
+              // 1. Paparkan data cache tempatan serta-merta tanpa menunggu pelayan
               try {
-                const r = await call(EP.dashboard, { staff_no: sess.staff_no, staff_id: sess.staff_id });
-                setData(r); setOnline(true); setAt(new Date().toLocaleTimeString('ms-MY', { hour: '2-digit', minute: '2-digit' }));
-                
-                setTags(await getLocalTags());
-                const d = new Date();
-                const detailKey = `TAG_DETAILS_${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-                const detailsStr = await SecureStore.getItemAsync(detailKey);
-                if (detailsStr) setTagDetails(JSON.parse(detailsStr));
-                const syncedTodayStr = await SecureStore.getItemAsync('SYNCED_TODAY_PORTAL').catch(() => null);
+                const [localTags, detailsStr, syncedTodayStr, cachedDashStr] = await Promise.all([
+                  getLocalTags(),
+                  SecureStore.getItemAsync(detailKey).catch(() => null),
+                  SecureStore.getItemAsync('SYNCED_TODAY_PORTAL').catch(() => null),
+                  SecureStore.getItemAsync(dashCacheKey).catch(() => null),
+                ]);
+                setTags(localTags);
+                if (detailsStr) {
+                  try { setTagDetails(JSON.parse(detailsStr)); } catch (_) {}
+                }
                 if (syncedTodayStr) {
                   try {
                     const parsedToday = JSON.parse(syncedTodayStr);
@@ -714,6 +720,23 @@ jobs:
                     }
                   } catch (_) {}
                 }
+                if (cachedDashStr) {
+                  try {
+                    const cachedDash = JSON.parse(cachedDashStr);
+                    if (cachedDash && typeof cachedDash === 'object') {
+                      setData((prev) => prev || cachedDash);
+                      const cp = findPhoto(cachedDash);
+                      if (cp) { setPhoto((prev) => prev || cp); setBadPhoto(false); }
+                    }
+                  } catch (_) {}
+                }
+              } catch (_) {}
+
+              // 2. Segerakkan data terkini daripada pelayan di latar belakang
+              try {
+                const r = await call(EP.dashboard, { staff_no: sess.staff_no, staff_id: sess.staff_id });
+                setData(r); setOnline(true); setAt(new Date().toLocaleTimeString('ms-MY', { hour: '2-digit', minute: '2-digit' }));
+                SecureStore.setItemAsync(dashCacheKey, JSON.stringify(r)).catch(() => {});
                 try { dashWebRef.current?.reload(); } catch (_) {}
                 
                 { const p = findPhoto(r); if (p) { setPhoto(p); setBadPhoto(false); } }
@@ -803,7 +826,7 @@ jobs:
                  );
               } else if (legacyMethod) {
                  const methodName = labelOfMethod(legacyMethod);
-                 const locLine = portalLoc ? `Lokasi: ${portalLoc}` : '*Dikemaskini daripada Log Kehadiran portal.*';
+                 const locLine = portalLoc ? `Lokasi: ${portalLoc}` : '*Disegerakkan daripada Log Kehadiran portal.*';
                  speakMalay(`${title} pada pukul ${timeVal}, menggunakan kaedah ${methodName}${portalLoc ? ', di ' + portalLoc : ''}.`);
                  Alert.alert(
                    `Maklumat ${title}`, 
@@ -1959,7 +1982,7 @@ jobs:
                   <View style={{ flex: 1 }}>
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 8, backgroundColor: C.field, borderBottomWidth: 1, borderBottomColor: C.line }}>
                       <Text style={{ fontSize: 11, color: rowsList.length > 0 ? '#2E7D4F' : C.mute, fontWeight: '700' }}>
-                        {rowsList.length > 0 ? `✓ ${rowsList.length} hari dikemaskini (${monthNames[selMonth - 1]} ${selYear})` : '🌐 ihr.mtib.gov.my'}
+                        {rowsList.length > 0 ? `✓ ${rowsList.length} hari disegerakkan (${monthNames[selMonth - 1]} ${selYear})` : '🌐 ihr.mtib.gov.my'}
                       </Text>
                       <View style={{ flexDirection: 'row', gap: 8 }}>
                         <Pressable
@@ -2810,12 +2833,12 @@ jobs:
                   await SecureStore.setItemAsync(syncFlagKey, 'true').catch(() => {});
                   if (!silent) {
                     triggerVibrate(true);
-                    setOk('Wajah rujukan berjaya dikemaskini daripada pelayan iHR.');
+                    setOk('Wajah rujukan berjaya disegerakkan daripada storan pelayan iHR.');
                   }
                 } else if (!silent) {
                   Alert.alert(
                     'Storan Wajah Pelayan',
-                    'Tiada gambar wajah ditemui di pelayan lagi. Sila ambil gambar wajah anda dan tekan "Kemaskini Pada Pelayan".'
+                    'Tiada gambar wajah ditemui di pelayan lagi. Sila ambil gambar wajah anda dan tekan "Segerak Pelayan".'
                   );
                 }
               } catch (e) {
@@ -2965,9 +2988,9 @@ jobs:
                 setServerSynced(true);
                 await SecureStore.setItemAsync(syncFlagKey, 'true').catch(() => {});
                 triggerVibrate(true);
-                setStatusText('Wajah rujukan aktif & dikemaskini!');
-                setOk('Wajah rujukan berjaya disimpan dan dikemaskini untuk Terminal FR.');
-                speakMalay('Wajah rujukan berjaya disimpan dan dikemaskini.');
+                setStatusText('Wajah rujukan aktif & disegerakkan!');
+                setOk('Wajah rujukan berjaya disimpan dan disegerakkan untuk Terminal FR.');
+                speakMalay('Wajah rujukan berjaya disimpan dan disegerakkan.');
               } catch (e) {
                 setErr(`Ralat semasa menyimpan wajah rujukan: ${e.message}`);
               } finally {
@@ -3237,7 +3260,7 @@ jobs:
                           {sess?.name || 'Pengguna'}
                         </Text>
                         <Text style={{ fontSize: 11, color: C.mute, marginTop: 2 }}>
-                          No. Staf: {sess?.staff_no || '-'} · {serverSynced ? '☁️ Wajah DiKemaskini' : '📱 Sedia Imbas'}
+                          No. Staf: {sess?.staff_no || '-'} · {serverSynced ? '☁️ Wajah Disegerak' : '📱 Sedia Imbas'}
                         </Text>
                       </View>
                       <Pressable
@@ -3245,7 +3268,7 @@ jobs:
                         disabled={syncingServer}
                         accessible={true}
                         accessibilityRole="button"
-                        accessibilityLabel="Kemaskini wajah dengan storan pelayan"
+                        accessibilityLabel="Segerakkan wajah dengan storan pelayan"
                         style={{
                           width: 38,
                           height: 38,
@@ -3401,7 +3424,7 @@ jobs:
                           <Btn
                             kind="ghost"
                             icon="☁️"
-                            label="Kemaskini Pada Pelayan"
+                            label="Segerak Pelayan"
                             onPress={enrollReferenceFace}
                             busy={syncingServer}
                           />
@@ -3873,7 +3896,7 @@ jobs:
           export const BASE_URL = 'https://ihr.mtib.gov.my/';
           export const EP = {
           register:  { path: 'api/user_registration', method: 'POST', code: 'R', retry: true },
-          dashboard: { path: 'api/dashboard',         method: 'POST', code: 'D', flip: true, retry: true },
+          dashboard: { path: 'api/dashboard',         method: 'GET',  code: 'D', flip: true, retry: false, timeout: 12000 },
           geotag:    { path: 'api/geotagging',        method: 'POST', code: 'G', retry: true, jsonFirst: true },
           qr:        { path: 'api/qr_scanner',        method: 'POST', code: 'Q', retry: true },
           fr:        { path: 'api/device_data',       method: 'POST', code: 'F', retry: true, jsonFirst: true },
@@ -3924,7 +3947,7 @@ jobs:
               const kind = kinds[i];
               if (kind === 'multipart' && Object.keys(body).length === 0) break;
               const ctl = new AbortController();
-              const t = setTimeout(() => ctl.abort(), 45000);
+              const t = setTimeout(() => ctl.abort(), ep.timeout || 25000);
               try {
                 const r = await once(ep, body, kind, ctl.signal);
                 if (r.ok) { try { return JSON.parse(r.text); } catch { return { raw: r.text }; } }
