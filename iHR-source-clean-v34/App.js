@@ -29,7 +29,7 @@ Vibration.vibrate([0, 140, 70, 140]);
 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
 Vibration.vibrate(90);
 }
-} catch () {}
+} catch (_) {}
 };
 const speakMalay = async (text, force = false) => {
 try {
