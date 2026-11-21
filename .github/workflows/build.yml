@@ -1,265 +1,72 @@
-name: Build iHR APK
-
-on:
-
-  workflow_dispatch:
-
-  push:
-
-    branches: [main]
-
-    tags:
-
-      - 'v*'
-
-
-
-permissions:
-
-  contents: write
-
-
-
-jobs:
-
-  apk:
-
-    runs-on: ubuntu-latest
-
-    timeout-minutes: 60
-
-    permissions:
-
-      contents: write
-
-    steps:
-
-      - uses: actions/checkout@v4
-
-
-
-      - name: Locate project folder and set build number
-
-        env:
-
-          BUILD_NUM: ${{ github.run_number }}
-
-        run: |
-
-          P=$(find . -name package.json -not -path '*/node_modules/*' | head -1)
-
-          [ -z "$P" ] && { echo "No package.json found in repo. Files:"; ls -R | head -50; exit 1; }
-
-          APP_DIR=$(dirname "$P")
-
-          echo "APP_DIR=$APP_DIR" >> "$GITHUB_ENV"
-
-          echo "Project folder: $APP_DIR"
-
-          sed -i "s/\"versionCode\": [0-9]*/\"versionCode\": $BUILD_NUM/" "$APP_DIR/app.json"
-
-
-
-      - name: Strip invisible characters from JS files
-
-        run: |
-
-          node -e '
-
-            const fs = require("fs");
-
-            const files = ["App.js", "src/api.js", "src/theme.js"];
-
-            for (const f of files) {
-
-              if (fs.existsSync(f)) {
-
-                const raw = fs.readFileSync(f, "utf8");
-
-                const clean = raw.replace(/[\u200B-\u200D\uFEFF\u00A0]/g, (m) => m === "\u00A0" ? " " : "");
-
-                fs.writeFileSync(f, clean, "utf8");
-
-                console.log("Cleaned:", f);
-
-              }
-
-            }
-
-          '
-
-        working-directory: ${{ env.APP_DIR }}
-
-
-
-      - uses: actions/setup-node@v4
-
-        with:
-
-          node-version: 20
-
-
-
-      - uses: actions/setup-java@v4
-
-        with:
-
-          distribution: temurin
-
-          java-version: 17
-
-
-
-      - name: Install packages
-
-        run: npm install --legacy-peer-deps
-
-        working-directory: ${{ env.APP_DIR }}
-
-
-
-      - name: Generate Android project
-
-        run: npx expo prebuild --platform android --no-install
-
-        working-directory: ${{ env.APP_DIR }}
-
-
-
-      - name: Fix missing splash color
-
-        run: |
-
-          F=android/app/src/main/res/values/colors.xml
-
-          mkdir -p "$(dirname "$F")"
-
-          [ -f "$F" ] || printf '<resources>\n</resources>\n' > "$F"
-
-          grep -q splashscreen_background "$F" || sed -i 's|</resources>|  <color name="splashscreen_background">#FFFFFF</color>\n</resources>|' "$F"
-
-          cat "$F"
-
-        working-directory: ${{ env.APP_DIR }}
-
-
-
-      - name: Point Gradle at the SDK and harden downloads
-
-        run: |
-
-          echo "sdk.dir=$ANDROID_HOME" > android/local.properties
-
-          {
-
-            echo "systemProp.org.gradle.internal.http.connectionTimeout=180000"
-
-            echo "systemProp.org.gradle.internal.http.socketTimeout=180000"
-
-            echo "systemProp.org.gradle.internal.repository.max.retries=8"
-
-            echo "systemProp.org.gradle.internal.repository.initial.backoff=2000"
-
-          } >> android/gradle.properties
-
-        working-directory: ${{ env.APP_DIR }}
-
-
-
-      - uses: actions/cache@v4
-
-        with:
-
-          path: |
-
-            ~/.npm
-
-            ~/.gradle/caches
-
-            ~/.gradle/wrapper
-
-          key: gradle-npm-${{ runner.os }}-${{ hashFiles('**/package.json') }}
-
-          restore-keys: gradle-npm-${{ runner.os }}-
-
-
-
-      - name: Build APK (retries on network errors)
-
-        run: |
-
-          chmod +x gradlew
-
-          n=0
-
-          until ./gradlew assembleRelease --no-daemon; do
-
-            n=$((n+1))
-
-            if [ "$n" -ge 3 ]; then echo "Build failed after $n tries"; exit 1; fi
-
-            echo "Retrying in 30s (try $((n+1)) of 3)..."; sleep 30
-
-          done
-
-        working-directory: ${{ env.APP_DIR }}/android
-
-
-
-      - name: Rename Release APK
-
-        run: |
-
-          mkdir -p release-apk
-
-          APK_SRC=$(find "${{ env.APP_DIR }}/android/app/build/outputs/apk/release" -name "*.apk" | head -1)
-
-          [ -z "$APK_SRC" ] && { echo "No release APK found!"; exit 1; }
-
-          cp "$APK_SRC" "release-apk/iHR-v1.1.0-${{ github.run_number }}.apk"
-
-          ls -lh release-apk/
-
-
-
-      - name: Upload APK Artifact
-
-        uses: actions/upload-artifact@v7
-
-        with:
-
-          name: iHR-v1.1.0-${{ github.run_number }}.apk
-
-          path: release-apk/iHR-v1.1.0-${{ github.run_number }}.apk
-
-          archive: false
-
-
-
-      - name: Create Release and Upload APK
-
-        uses: softprops/action-gh-release@v3
-
-        if: success()
-
-        with:
-
-          tag_name: "v1.1.0-${{ github.run_number }}"
-
-          name: "iHR APK Build v1.1.0 #${{ github.run_number }}"
-
-          body: "iHR APK v1.1.0: Admin Mock Location with Server Geofence Dropdown, Mobile Face Recognition (FR) with GPS & Image, Streamlined Dashboard Header & WBF Badge."
-
-          draft: false
-
-          prerelease: false
-
-          make_latest: true
-
-          files: |
-
-            release-apk/iHR-v1.1.0-${{ github.run_number }}.apk
-
-        env:
-
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+{
+  "expo": {
+    "name": "iHR",
+    "slug": "ihr",
+    "owner": "kimkuis-team",
+    "version": "1.1.0",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "enabled": true,
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0,
+      "url": "https://u.expo.dev/f42a4a59-a4d5-4726-833f-5d343e669871"
+    },
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "icon": "./assets/icon.png",
+    "android": {
+      "package": "my.gov.mtib.ihr",
+      "versionCode": 9,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#FFFFFF"
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.VIBRATE",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.SCHEDULE_EXACT_ALARM"
+      ]
+    },
+    "plugins": [
+      "expo-updates",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow iHR to access the camera for QR scanning and attendance photos."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Allow iHR to use your location for geotagging attendance."
+        }
+      ],
+      "expo-secure-store",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#BC4A32"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Benarkan iHR mengakses galeri untuk memuat naik kod QR."
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "f42a4a59-a4d5-4726-833f-5d343e669871"
+      }
+    },
+    "scheme": "ihr2"
+  }
+}
