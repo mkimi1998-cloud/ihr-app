@@ -1934,7 +1934,7 @@ function Dashboard({ sess, go, onSess, onLogout }) {
 
       <View style={{ marginTop: 32, marginBottom: 10, alignItems: 'center' }}>
 
-        <Text style={{ color: C.mute, fontSize: 12, fontWeight: '600' }}>Copyright © 2026 MTIB</Text>
+        <Text style={{ color: C.mute, fontSize: 12, fontWeight: '600' }}>Copyright © 2026 MTIB  · OTA Live</Text>
 
       </View>
 
@@ -8180,7 +8180,7 @@ const makeStyles = (C) => StyleSheet.create({
 
   statRow: { flexDirection: 'row', gap: 12 },
 
-  stat: { flex: 1, borderRadius: 20, padding: 16, borderWidth: 1.5, shadowColor: C.shadowColor || '#000', shadowOpacity: 0.04, shadowRadius: 6, elevation: 2 },
+  stat: { flex: 1, borderRadius: 20, padding:f 16, borderWidth: 1.5, shadowColor: C.shadowColor || '#000', shadowOpacity: 0.04, shadowRadius: 6, elevation: 2 },
 
   statH: { flexDirection: 'row', alignItems: 'center', gap: 8 },
 
