@@ -110,7 +110,7 @@ jobs:
         if: env.EXPO_TOKEN != ''
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-        run: npx eas-cli@latest update --branch production --message "OTA Build #${{ github.run_number }}" --non-interactive
+        run: npx eas-cli@latest update --platform android --channel production --message "OTA Build #${{ github.run_number }}" --non-interactive
         working-directory: ${{ env.APP_DIR }}
 
       - name: Rename Release APK
