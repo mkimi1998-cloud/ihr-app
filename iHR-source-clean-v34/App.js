@@ -19,7 +19,7 @@ import { WebView } from 'react-native-webview';
 import { BarCodeScanner } from 'expo-barcode-scanner';
 import { COLOR_THEMES, UI_STYLES, buildTheme, getIconName } from './src/theme';
 import { BASE_URL, EP, addLocalTag, call, clearSession, deviceId, findPhoto, getLocalTags, kerjaLuarFields, loadSession, parseGeofenceLocations, parseReference, parseTabletLocations, peek, saveDeviceId, saveSession, unwrap } from './src/api';
-​const GITHUB_REPO = 'mkimi1998-cloud/ihr-app';
+const GITHUB_REPO = 'mkimi1998-cloud/ihr-app';
 const triggerVibrate = (strong = true) => {
 try {
 if (strong) {
