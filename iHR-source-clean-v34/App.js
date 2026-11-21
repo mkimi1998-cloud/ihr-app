@@ -45,7 +45,7 @@ language: 'ms-MY',
 pitch: 1.0,
 rate: 0.94,
 });
-} catch () {}
+} catch (_) {}
 };
 Notifications.setNotificationHandler({
 handleNotification: async () => ({
@@ -294,7 +294,7 @@ const r = rev[0];
 const streetPart = [r.name, r.street, r.city, r.subregion].filter(Boolean).join(', ');
 if (streetPart) geoAddr = ${streetPart} (${lat.toFixed(5)}, ${lng.toFixed(5)});
 }
-} catch () {}
+} catch (_) {}
 if (place && !isGenericAct) return ${place} · ${geoAddr};
 if (place && isGenericAct) return ${geoAddr} (${place});
 return geoAddr;
@@ -307,7 +307,7 @@ return ${FileSystem.documentDirectory}${filename}.json;
 async function saveCacheFile(filename, data) {
 try {
 await FileSystem.writeAsStringAsync(getCacheFilePath(filename), JSON.stringify(data));
-} catch () {}
+} catch (_) {}
 }
 async function loadCacheFile(filename) {
 try {
@@ -317,7 +317,7 @@ if (info.exists) {
 const content = await FileSystem.readAsStringAsync(path);
 return JSON.parse(content);
 }
-} catch () {}
+} catch (_) {}
 return null;
 }
 const saveTagDetails = async (method, lat, lng, customAddress = '') => {
@@ -627,7 +627,7 @@ SecureStore.getItemAsync(dashCacheKey).catch(() => null),
 ]);
 setTags(localTags);
 if (detailsStr) {
-try { setTagDetails(JSON.parse(detailsStr)); } catch () {}
+try { setTagDetails(JSON.parse(detailsStr)); } catch (_) {}
 }
 if (syncedTodayStr) {
 try {
@@ -635,7 +635,7 @@ const parsedToday = JSON.parse(syncedTodayStr);
 if (parsedToday && parsedToday.date === todayStr()) {
 setPortalToday(parsedToday);
 }
-} catch () {}
+} catch (_) {}
 }
 if (cachedDashStr) {
 try {
@@ -645,9 +645,9 @@ setData((prev) => prev || cachedDash);
 const cp = findPhoto(cachedDash);
 if (cp) { setPhoto((prev) => prev || cp); setBadPhoto(false); }
 }
-} catch () {}
+} catch (_) {}
 }
-} catch () {}
+} catch (_) {}
 ​try {
 const r = await call(EP.dashboard, { staff_no: sess.staff_no, staff_id: sess.staff_id });
 setData(r); setOnline(true); setAt(new Date().toLocaleTimeString('ms-MY', { hour: '2-digit', minute: '2-digit' }));
@@ -1188,10 +1188,10 @@ const old = await SecureStore.getItemAsync('SYNCED_SERVER_ATTENDANCE');
 const oldArr = old ? JSON.parse(old) : [];
 const merged = mergeAttendance(Array.isArray(oldArr) ? oldArr : [], msg.payload.rows);
 await SecureStore.setItemAsync('SYNCED_SERVER_ATTENDANCE', JSON.stringify(merged.slice(0, 20)));
-} catch () {}
+} catch (_) {}
 }
 }
-} catch () {}
+} catch (_) {}
 };
 ​const scraperScript =  (function() { try { var style = document.createElement('style'); style.innerHTML = \
 .main-header, .main-sidebar, .main-footer, .content-header { display: none !important; }
@@ -2527,7 +2527,7 @@ setLiveGpsAddress(addr || ${loc.fix.latitude.toFixed(5)}, ${loc.fix.longitude.to
 } else {
 setLiveGpsAddress(${loc.fix.latitude.toFixed(5)}, ${loc.fix.longitude.toFixed(5)});
 }
-} catch () {
+} catch (_) {
 if (on && loc.fix) {
 setLiveGpsAddress(${loc.fix.latitude.toFixed(5)}, ${loc.fix.longitude.toFixed(5)});
 }
