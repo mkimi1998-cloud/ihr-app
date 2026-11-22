@@ -31,5 +31,6 @@ jobs:
       - name: Publish OTA Update to EAS
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-        run: npx eas-cli@latest update --channel production --message "${{ github.event.head_commit.message }}" --non-interactive
+        run: npx eas-cli@latest update --platform android --channel production --message "${{ github.event.head_commit.message || format('OTA Update Run {0}', github.run_number) }}" --non-interactive
         working-directory: ${{ env.APP_DIR }}
+
