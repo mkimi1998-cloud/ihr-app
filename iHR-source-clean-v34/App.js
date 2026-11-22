@@ -1934,7 +1934,7 @@ function Dashboard({ sess, go, onSess, onLogout }) {
 
       <View style={{ marginTop: 32, marginBottom: 10, alignItems: 'center' }}>
 
-        <Text style={{ color: C.mute, fontSize: 12, fontWeight: '600' }}>Copyright © 2026 MTIB  · OTA Live</Text>
+        <Text style={{ color: C.mute, fontSize: 12, fontWeight: '600' }}>Copyright © 2026 MTIB</Text>
 
       </View>
 
