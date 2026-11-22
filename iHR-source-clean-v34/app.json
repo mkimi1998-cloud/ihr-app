@@ -5,7 +5,6 @@
     "owner": "kimkuis-team",
     "version": "1.1.0",
     "runtimeVersion": "1.1.0",
-    },
     "updates": {
       "enabled": true,
       "checkAutomatically": "ON_LOAD",
