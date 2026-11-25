@@ -14,6 +14,17 @@
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
     "icon": "./assets/icon.png",
+    "ios": {
+      "bundleIdentifier": "my.gov.mtib.ihr",
+      "buildNumber": "1",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Allow iHR to access the camera for QR scanning and attendance photos.",
+        "NSLocationWhenInUseUsageDescription": "Allow iHR to use your location for geotagging attendance.",
+        "NSPhotoLibraryUsageDescription": "Benarkan iHR mengakses galeri untuk memuat naik kod QR.",
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
     "android": {
       "package": "my.gov.mtib.ihr",
       "versionCode": 9,
