@@ -40,6 +40,13 @@ jobs:
           echo "APP_DIR=$APP_DIR" >> "$GITHUB_ENV"
           echo "Project folder: $APP_DIR"
           sed -i "s/\"versionCode\": [0-9]*/\"versionCode\": $BUILD_NUM/" "$APP_DIR/app.json"
+          echo "$IOS_P12_BASE64" | tr -d '\r\n ' | base64 --decode > "$RUNNER_TEMP/raw_cert.p12"
+            echo "$IOS_PROVISION_BASE64" | tr -d '\r\n ' | base64 --decode > "$PP_PATH"
+
+            # Re-wrap modern Windows AES-256 PFX into legacy 3DES PKCS12 so macOS security import decodes it cleanly
+            openssl pkcs12 -in "$RUNNER_TEMP/raw_cert.p12" -out "$RUNNER_TEMP/cert_bundle.pem" -nodes -passin "pass:$IOS_P12_PASSWORD" -legacy || \
+            openssl pkcs12 -in "$RUNNER_TEMP/raw_cert.p12" -out "$RUNNER_TEMP/cert_bundle.pem" -nodes -passin "pass:$IOS_P12_PASSWORD"
+            openssl pkcs12 -export -in "$RUNNER_TEMP/cert_bundle.pem" -out "$CERTIFICATE_PATH" -passout "pass:$IOS_P12_PASSWORD" -certpbe PBE-SHA1-3DES -keypbe PBE-SHA1-3DES -macalg sha1
 
       - name: Strip invisible characters from JS files
         run: |
