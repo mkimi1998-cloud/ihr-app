@@ -118,13 +118,6 @@ jobs:
           done
         working-directory: ${{ env.APP_DIR }}/android
 
-      - name: Publish EAS OTA Update
-        if: env.EXPO_TOKEN != ''
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-        run: npx eas-cli@latest update --platform android --channel production --message "OTA Build ${{ github.run_number }}" --non-interactive
-        working-directory: ${{ env.APP_DIR }}
-
       - name: Rename Release APK
         run: |
           mkdir -p release-apk
@@ -350,13 +343,6 @@ jobs:
             cp -r "$ARCHIVE_PATH/Products/Applications/"*.app "$EXPORT_PATH/Payload/"
             (cd "$EXPORT_PATH" && zip -qry "${SCHEME}-unsigned.ipa" Payload)
           fi
-
-      - name: Publish EAS OTA Update (iOS)
-        if: env.EXPO_TOKEN != ''
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-        run: npx eas-cli@latest update --platform ios --channel production --message "OTA iOS Build ${{ github.run_number }}" --non-interactive
-        working-directory: ${{ env.APP_DIR }}
 
       - name: Prepare Release IPA
         run: |
