@@ -15,7 +15,7 @@
     "userInterfaceStyle": "automatic",
     "icon": "./assets/icon.png",
     "ios": {
-      "bundleIdentifier": "my.gov.mtib.ihr",
+      "bundleIdentifier": "my.gov.mtib.ihr2",
       "buildNumber": "1",
       "supportsTablet": true,
       "infoPlist": {
