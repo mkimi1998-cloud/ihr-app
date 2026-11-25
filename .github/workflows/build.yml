@@ -286,9 +286,11 @@ jobs:
           SCHEME=$(basename "$WORKSPACE" .xcworkspace)
           ARCHIVE_PATH="$RUNNER_TEMP/${SCHEME}.xcarchive"
           EXPORT_PATH="$RUNNER_TEMP/export"
+          BUILD_LOG="$RUNNER_TEMP/xcodebuild.log"
 
+          set -o pipefail
           if [ "$SIGN_READY" = "true" ]; then
-            xcodebuild -workspace "$WORKSPACE" \
+            if ! xcodebuild -workspace "$WORKSPACE" \
               -scheme "$SCHEME" \
               -configuration Release \
               -sdk iphoneos \
@@ -297,7 +299,11 @@ jobs:
               CODE_SIGN_STYLE="Manual" \
               CODE_SIGN_IDENTITY="Apple Distribution" \
               PROVISIONING_PROFILE_SPECIFIER="$PROFILE_NAME" \
-              archive
+              archive 2>&1 | tee "$BUILD_LOG"; then
+              echo "=== XCODEBUILD ERRORS ==="
+              grep -E "error:|❌|Error:|Command PhaseScriptExecution failed" "$BUILD_LOG" | tail -n 40
+              exit 1
+            fi
 
             cat > "$RUNNER_TEMP/ExportOptions.plist" <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
@@ -326,7 +332,7 @@ jobs:
               -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist" \
               -exportPath "$EXPORT_PATH"
           else
-            xcodebuild -workspace "$WORKSPACE" \
+            if ! xcodebuild -workspace "$WORKSPACE" \
               -scheme "$SCHEME" \
               -configuration Release \
               -sdk iphoneos \
@@ -334,7 +340,11 @@ jobs:
               CODE_SIGNING_ALLOWED=NO \
               CODE_SIGNING_REQUIRED=NO \
               CODE_SIGN_IDENTITY="" \
-              archive
+              archive 2>&1 | tee "$BUILD_LOG"; then
+              echo "=== XCODEBUILD ERRORS ==="
+              grep -E "error:|❌|Error:|Command PhaseScriptExecution failed" "$BUILD_LOG" | tail -n 40
+              exit 1
+            fi
 
             mkdir -p "$EXPORT_PATH/Payload"
             cp -r "$ARCHIVE_PATH/Products/Applications/"*.app "$EXPORT_PATH/Payload/"
