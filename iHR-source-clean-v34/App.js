@@ -20,6 +20,9 @@ import { BarCodeScanner } from 'expo-barcode-scanner';
 import { COLOR_THEMES, UI_STYLES, buildTheme, getIconName } from './src/theme';
 import { BASE_URL, EP, addLocalTag, call, clearSession, deviceId, findPhoto, getLocalTags, kerjaLuarFields, loadSession, parseReference, parseTabletLocations, peek, saveDeviceId, saveSession, unwrap } from './src/api';
 
+// Build-time flag: set EXPO_PUBLIC_ENABLE_ADMIN=true for admin.apk, false for no-admin.ipa
+const ENABLE_ADMIN = process.env.EXPO_PUBLIC_ENABLE_ADMIN === 'true';
+
 const triggerVibrate = (strong = true) => {
   try {
     if (strong) {
@@ -138,7 +141,6 @@ async function syncWbfReminders(opts = {}) {
     const hasClockedInToday = !!firstMs;
     const hasClockedOutToday = !!(lastMs && firstMs && lastMs > firstMs && new Date(lastMs).getHours() >= 16);
 
-    // 1. Jadualkan peringatan Waktu Masuk (Isnin - Jumaat, 7:30 AM - 9:00 AM)
     for (let weekday = 2; weekday <= 6; weekday++) {
       const isTodayWeekday = (now.getDay() + 1) === weekday;
       if (isTodayWeekday && hasClockedInToday) continue;
@@ -161,7 +163,6 @@ async function syncWbfReminders(opts = {}) {
       });
     }
 
-    // 2. Jadualkan peringatan Waktu Keluar (Isnin - Jumaat, 4:30 PM - 6:00 PM)
     const targetOutMs = computeWbfTargetOut(firstMs);
     for (let weekday = 2; weekday <= 6; weekday++) {
       const isTodayWeekday = (now.getDay() + 1) === weekday;
@@ -297,26 +298,6 @@ const wrapName = (n, max = 26) => {
 };
 const colorOf = (c, fb) => { const v = String(c ?? '').trim(); return /^[0-9a-f]{6}$/i.test(v) ? '#' + v : v || fb; };
 
-const parseVersionParts = (v) => {
-  if (!v) return [0, 0, 0, 0];
-  const clean = String(v).replace(/^[vV]/, '').trim();
-  const matched = clean.match(/\d+/g);
-  if (!matched) return [0, 0, 0, 0];
-  const nums = matched.map((n) => parseInt(n, 10) || 0);
-  while (nums.length < 4) nums.push(0);
-  return nums;
-};
-const isRemoteNewer = (remoteVer, localVer) => {
-  const r = parseVersionParts(remoteVer);
-  const l = parseVersionParts(localVer);
-  for (let i = 0; i < Math.max(r.length, l.length); i++) {
-    const rn = r[i] || 0;
-    const ln = l[i] || 0;
-    if (rn > ln) return true;
-    if (rn < ln) return false;
-  }
-  return false;
-};
 const resolvePortalLocation = async (placeRaw, coordRaw) => {
   const cleanPlace = String(placeRaw || '').replace(/\s+/g, ' ').trim();
   const isHeader = /^(tempat\s*\/\s*jenis|tempat|lokasi|masa|kaedah|koordinat|-)$/i.test(cleanPlace);
@@ -2847,12 +2828,14 @@ function FaceRecognitionView({ sess, back }) {
   useEffect(() => {
     let active = true;
     (async () => {
-      const savedEp = await SecureStore.getItemAsync('FR_CUSTOM_ENDPOINT').catch(() => null);
-      const savedImei = await SecureStore.getItemAsync('FR_TABLET_IMEI').catch(() => null);
-      const savedDevLbl = await SecureStore.getItemAsync('FR_DEVICE_LABEL').catch(() => null);
-      if (savedEp && active) setCustomEpInput(savedEp);
-      if (savedImei && active) setFrTabletImei(savedImei);
-      if (savedDevLbl && active) setSelectedFrLabel(savedDevLbl);
+      if (ENABLE_ADMIN) {
+        const savedEp = await SecureStore.getItemAsync('FR_CUSTOM_ENDPOINT').catch(() => null);
+        const savedImei = await SecureStore.getItemAsync('FR_TABLET_IMEI').catch(() => null);
+        const savedDevLbl = await SecureStore.getItemAsync('FR_DEVICE_LABEL').catch(() => null);
+        if (savedEp && active) setCustomEpInput(savedEp);
+        if (savedImei && active) setFrTabletImei(savedImei);
+        if (savedDevLbl && active) setSelectedFrLabel(savedDevLbl);
+      }
 
       try {
         const res = await call(EP.tabletRef, {});
@@ -2872,13 +2855,6 @@ function FaceRecognitionView({ sess, back }) {
         });
         const combined = [...mergedMap.values()];
         setFrDevices(combined);
-        if (savedDevLbl && savedDevLbl !== MANUAL_FR_DEVICE_LABEL && savedDevLbl !== GPS_DEVICE_LOC_LABEL) {
-          const m = combined.find((d) => d.label === savedDevLbl);
-          if (m) {
-            setSelectedFrLabel(m.label);
-            setFrTabletImei(m.imei);
-          }
-        }
       } catch (_) {}
     })();
     return () => { active = false; };
@@ -2970,7 +2946,6 @@ function FaceRecognitionView({ sess, back }) {
     try {
       setErr('');
       setStatusText('Memproses pengecaman wajah…');
-      // On iOS, skipProcessing: true can occasionally hang takePictureAsync
       const p = await ref.current?.takePictureAsync({
         quality: 0.45,
         skipProcessing: Platform.OS === 'android',
@@ -3117,8 +3092,12 @@ function FaceRecognitionView({ sess, back }) {
       : getActiveDeviceLocation();
     setStatusText(`Menghantar rekod FR (${activeLoc})…`);
 
-    const savedTabletImei = frTabletImei || (await SecureStore.getItemAsync('FR_TABLET_IMEI').catch(() => null)) || '772df402efe84b8293e95509af4b31e5';
-    const customFrPath = customEpInput || (await SecureStore.getItemAsync('FR_CUSTOM_ENDPOINT').catch(() => null));
+    const savedTabletImei = ENABLE_ADMIN
+      ? (frTabletImei || (await SecureStore.getItemAsync('FR_TABLET_IMEI').catch(() => null)) || '772df402efe84b8293e95509af4b31e5')
+      : '772df402efe84b8293e95509af4b31e5';
+    const customFrPath = ENABLE_ADMIN
+      ? (customEpInput || (await SecureStore.getItemAsync('FR_CUSTOM_ENDPOINT').catch(() => null)))
+      : null;
     const capTime = nowSqlTimestamp();
 
     const deviceDataPayload = {
@@ -3244,8 +3223,12 @@ function FaceRecognitionView({ sess, back }) {
 
   return (
     <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 32 }}>
-      <Top title="Pengecaman Wajah (FR)" onBack={back} onTitleLongPress={() => setAskFrPwd(!askFrPwd)} />
-      {askFrPwd && !frUnlocked && (
+      <Top
+        title="Pengecaman Wajah (FR)"
+        onBack={back}
+        onTitleLongPress={ENABLE_ADMIN ? () => setAskFrPwd(!askFrPwd) : undefined}
+      />
+      {ENABLE_ADMIN && askFrPwd && !frUnlocked && (
         <View style={{ padding: 16, gap: 10 }}>
           <TextInput
             style={s.in}
@@ -3260,7 +3243,7 @@ function FaceRecognitionView({ sess, back }) {
           />
         </View>
       )}
-      {frUnlocked && (
+      {ENABLE_ADMIN && frUnlocked && (
         <View style={{ padding: 16, gap: 10 }}>
           <Card title="Tetapan Lanjutan FR (Admin)" icon="⚙️" tint={C.primary}>
             <Text style={s.lbl}>Mod Lokasi / Terminal Peranti FR:</Text>
@@ -3675,8 +3658,10 @@ function Cam({ mode, sess, back, onOpenGen }) {
       img: shot.base64,
       radius_range: geoRadius,
       radius_meters: radiusMeters,
-      bypass_radius: unlocked ? 1 : 0,
-      mock_location: unlocked ? true : false
+      ...(ENABLE_ADMIN ? {
+        bypass_radius: unlocked ? 1 : 0,
+        mock_location: unlocked ? true : false,
+      } : {}),
     };
     if (act === 3) {
       if (!klType) return setErr('Sila pilih jenis kerja luar');
@@ -3713,8 +3698,12 @@ function Cam({ mode, sess, back, onOpenGen }) {
   
   return (
     <ScrollView keyboardShouldPersistTaps="handled">
-      <Top title={mode === 'qr' ? 'Imbas QR' : 'Geotagging'} onBack={back} onTitleLongPress={() => setAskPwd(!askPwd)} />
-      {askPwd && !unlocked && (
+      <Top
+        title={mode === 'qr' ? 'Imbas QR' : 'Geotagging'}
+        onBack={back}
+        onTitleLongPress={ENABLE_ADMIN ? () => setAskPwd(!askPwd) : undefined}
+      />
+      {ENABLE_ADMIN && askPwd && !unlocked && (
         <View style={{ padding: 16, gap: 10 }}>
           <TextInput 
             style={s.in} 
@@ -3737,7 +3726,7 @@ function Cam({ mode, sess, back, onOpenGen }) {
           }} />
         </View>
       )}
-      {unlocked && (
+      {ENABLE_ADMIN && unlocked && (
         <View style={{ padding: 16, gap: 10 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
             <Text style={s.lbl}>Gunakan Lokasi Semasa</Text>
@@ -3858,9 +3847,9 @@ function AppInner() {
   let body;
   if (sess === undefined) body = <View style={s.center}><ActivityIndicator size="large" color={C.primary} /></View>;
   else if (!sess) body = <Register onDone={setSess} initialName={logoutData?.name || ''} initialNo={logoutData?.staff_no || ''} />;
-  else if (view === 'qr') body = <Cam mode="qr" sess={sess} back={home} onOpenGen={() => setView('qrgen')} />;
+  else if (view === 'qr') body = <Cam mode="qr" sess={sess} back={home} onOpenGen={ENABLE_ADMIN ? () => setView('qrgen') : undefined} />;
   else if (view === 'fr') body = <FaceRecognitionView sess={sess} back={home} />;
-  else if (view === 'qrgen') body = <QrGeneratorView sess={sess} back={home} />;
+  else if (ENABLE_ADMIN && view === 'qrgen') body = <QrGeneratorView sess={sess} back={home} />;
   else if (view === 'geo') body = <Cam mode="photo" sess={sess} back={home} />;
   else if (view === 'history') body = <HistoryView sess={sess} back={home} />;
   else if (view === 'profile') body = <ProfileView sess={sess} back={home} />;
