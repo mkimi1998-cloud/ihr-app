@@ -139,7 +139,6 @@ async function syncWbfReminders(opts = {}) {
     const hasClockedOutToday = !!(lastMs && firstMs && lastMs > firstMs && new Date(lastMs).getHours() >= 16);
 
     // 1. Jadualkan peringatan Waktu Masuk (Isnin - Jumaat, 7:30 AM - 9:00 AM)
-    // Jika hari ini sudah clock-in, jadualkan bermula esok hari bekerja sahaja; jika belum, termasuk hari ini.
     for (let weekday = 2; weekday <= 6; weekday++) {
       const isTodayWeekday = (now.getDay() + 1) === weekday;
       if (isTodayWeekday && hasClockedInToday) continue;
@@ -157,13 +156,12 @@ async function syncWbfReminders(opts = {}) {
           hour: inH,
           minute: inM,
           repeats: true,
-          channelId: 'ihr-wbf-reminders',
+          ...(Platform.OS === 'android' ? { channelId: 'ihr-wbf-reminders' } : {}),
         },
       });
     }
 
     // 2. Jadualkan peringatan Waktu Keluar (Isnin - Jumaat, 4:30 PM - 6:00 PM)
-    // Jika sudah clock-in hari ini, kira sasaran tepat 9 jam WBF dari waktu masuk pelayan!
     const targetOutMs = computeWbfTargetOut(firstMs);
     for (let weekday = 2; weekday <= 6; weekday++) {
       const isTodayWeekday = (now.getDay() + 1) === weekday;
@@ -184,7 +182,7 @@ async function syncWbfReminders(opts = {}) {
             },
             trigger: {
               date: targetDate,
-              channelId: 'ihr-wbf-reminders',
+              ...(Platform.OS === 'android' ? { channelId: 'ihr-wbf-reminders' } : {}),
             },
           });
           continue;
@@ -204,7 +202,7 @@ async function syncWbfReminders(opts = {}) {
           hour: outH,
           minute: outM,
           repeats: true,
-          channelId: 'ihr-wbf-reminders',
+          ...(Platform.OS === 'android' ? { channelId: 'ihr-wbf-reminders' } : {}),
         },
       });
     }
@@ -579,11 +577,55 @@ const Select = ({ value, placeholder, options, onPick }) => {
 };
 const DateField = ({ value, onPick, min }) => {
   const { C, s } = useT();
-  const open = () => DateTimePickerAndroid.open({
-    value: parseYMD(value), mode: 'date', minimumDate: min ? parseYMD(min) : undefined,
-    onChange: (e, d) => { if (e?.type === 'set' && d) onPick(toYMD(d)); },
-  });
-  return (<Pressable onPress={open} style={[s.in, s.sel]}><Text style={{ color: C.ink, fontSize: 16, flex: 1 }}>{toDMY(value)}</Text><Text style={{ fontSize: 16 }}>📅</Text></Pressable>);
+  const [iosOpen, setIosOpen] = useState(false);
+  const [iosDraft, setIosDraft] = useState(value);
+
+  const open = () => {
+    if (Platform.OS === 'android') {
+      DateTimePickerAndroid.open({
+        value: parseYMD(value),
+        mode: 'date',
+        minimumDate: min ? parseYMD(min) : undefined,
+        onChange: (e, d) => { if (e?.type === 'set' && d) onPick(toYMD(d)); },
+      });
+    } else {
+      setIosDraft(value);
+      setIosOpen(!iosOpen);
+    }
+  };
+
+  return (
+    <View style={{ gap: 6 }}>
+      <Pressable onPress={open} style={[s.in, s.sel]}>
+        <Text style={{ color: C.ink, fontSize: 16, flex: 1 }}>{toDMY(value)}</Text>
+        <Text style={{ fontSize: 16 }}>📅</Text>
+      </Pressable>
+      {Platform.OS === 'ios' && iosOpen ? (
+        <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+          <TextInput
+            style={[s.in, { flex: 1, paddingVertical: 10 }]}
+            value={iosDraft}
+            onChangeText={setIosDraft}
+            placeholder="YYYY-MM-DD"
+            placeholderTextColor={C.mute}
+          />
+          <Pressable
+            onPress={() => {
+              if (/^\d{4}-\d{2}-\d{2}$/.test(iosDraft.trim())) {
+                onPick(iosDraft.trim());
+                setIosOpen(false);
+              } else {
+                Alert.alert('Format Tarikh', 'Sila masukkan format YYYY-MM-DD (Contoh: 2026-11-26)');
+              }
+            }}
+            style={{ backgroundColor: C.primary, paddingHorizontal: 14, paddingVertical: 11, borderRadius: 12 }}
+          >
+            <Text style={{ color: C.onPrimary, fontWeight: '700', fontSize: 13 }}>OK</Text>
+          </Pressable>
+        </View>
+      ) : null}
+    </View>
+  );
 };
 
 function Register({ onDone, initialName = '', initialNo = '' }) {
@@ -676,7 +718,6 @@ function Dashboard({ sess, go, onSess, onLogout }) {
     const dashCacheKey = `DASHBOARD_CACHE_${sess.staff_no || 'DEFAULT'}`;
     const detailKey = `TAG_DETAILS_${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 
-    // 1. Paparkan data cache tempatan serta-merta tanpa menunggu pelayan
     try {
       const [localTags, detailsStr, syncedTodayStr, cachedDashStr] = await Promise.all([
         getLocalTags(),
@@ -708,7 +749,6 @@ function Dashboard({ sess, go, onSess, onLogout }) {
       }
     } catch (_) {}
 
-    // 2. Kemaskini data terkini daripada pelayan di latar belakang
     try {
       const r = await call(EP.dashboard, { staff_no: sess.staff_no, staff_id: sess.staff_id });
       setData(r); setOnline(true); setAt(new Date().toLocaleTimeString('ms-MY', { hour: '2-digit', minute: '2-digit' }));
@@ -2257,7 +2297,6 @@ function QrGeneratorView({ sess, back }) {
           }
         }
       } catch (_) {
-        // Kekalkan PRESET_TABLET_LOCATIONS jika gagal muat turun
       } finally {
         if (active) setLoadingLocs(false);
       }
@@ -2291,7 +2330,11 @@ function QrGeneratorView({ sess, back }) {
       const url = `${BASE_URL}${QR_GEN_ENDPOINT}?imei=${encodeURIComponent(cleanImei)}`;
       const res = await fetch(url, {
         method: 'GET',
-        headers: { Accept: 'text/plain, application/json', imei: String(deviceId()) },
+        headers: {
+          Accept: 'text/plain, application/json',
+          'User-Agent': `iHR-Mobile/${Platform.OS}`,
+          imei: String(deviceId()),
+        },
       });
       const text = (await res.text()).trim();
       if (!res.ok || !text || text.startsWith('<')) {
@@ -2744,11 +2787,9 @@ function FaceRecognitionView({ sess, back }) {
   const [statusText, setStatusText] = useState('Letakkan wajah anda di dalam bingkai bujur');
   const [liveGpsAddress, setLiveGpsAddress] = useState('');
 
-  // State Peranti FR (Lokasi GPS Peranti + Terminal FR)
   const [frDevices, setFrDevices] = useState(PRESET_FR_DEVICES);
   const [selectedFrLabel, setSelectedFrLabel] = useState(GPS_DEVICE_LOC_LABEL);
   const [frTabletImei, setFrTabletImei] = useState(PRESET_FR_DEVICES[0].imei);
-  const [showDevicePicker, setShowDevicePicker] = useState(false);
   const [askFrPwd, setAskFrPwd] = useState(false);
   const [frUnlocked, setFrUnlocked] = useState(false);
   const [frPwd, setFrPwd] = useState('');
@@ -2929,7 +2970,11 @@ function FaceRecognitionView({ sess, back }) {
     try {
       setErr('');
       setStatusText('Memproses pengecaman wajah…');
-      const p = await ref.current?.takePictureAsync({ quality: 0.45, skipProcessing: true });
+      // On iOS, skipProcessing: true can occasionally hang takePictureAsync
+      const p = await ref.current?.takePictureAsync({
+        quality: 0.45,
+        skipProcessing: Platform.OS === 'android',
+      });
       if (!p) {
         setStatusText('Gagal merakam gambar wajah. Cuba semula.');
         speakMalay('Gagal merakam gambar wajah. Sila cuba semula.');
@@ -2937,8 +2982,8 @@ function FaceRecognitionView({ sess, back }) {
       }
       const resized = await ImageManipulator.manipulateAsync(
         p.uri,
-        [{ resize: { width: 480 } }],
-        { compress: 0.5, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+        [{ resize: { width: 380 } }],
+        { compress: 0.45, format: ImageManipulator.SaveFormat.JPEG, base64: true }
       );
       setShot(resized);
       triggerVibrate(false);
@@ -2982,8 +3027,6 @@ function FaceRecognitionView({ sess, back }) {
       method: 'fr',
       is_enroll: 1,
       img: base64Img,
-      face_image: base64Img,
-      photo: base64Img,
     };
     try {
       await call(EP.frEnroll, enrollPayload);
@@ -3090,11 +3133,10 @@ function FaceRecognitionView({ sess, back }) {
       type: 'fr',
       method: 'fr',
       img: target.base64,
-      face_image: target.base64,
     };
 
     const candidateEps = [
-      ...(customFrPath ? [{ path: customFrPath.replace(/^\/+/, ''), method: 'POST', code: 'F', retry: true, jsonFirst: true }] : []),
+      ...(customFrPath ? [{ path: customFrPath.replace(/^\/+/, ''), method: 'POST', code: 'F', retry: true, jsonFirst: true, timeout: 15000 }] : []),
       EP.fr,
       EP.fr2,
       EP.fr3,
@@ -3121,7 +3163,6 @@ function FaceRecognitionView({ sess, back }) {
         }
       }
 
-      // Hantar dengan koordinat GPS sebenar peranti ke pelayan iHR
       if (!syncedToDeviceDatas) {
         res = await call(EP.geotag, {
           staff_id: sess.staff_id,
@@ -3602,8 +3643,13 @@ function Cam({ mode, sess, back, onOpenGen }) {
       }
       const p = await ref.current.takePictureAsync({ quality: 0.4, base64: true, skipProcessing: false });
       if (p && p.uri) {
-        const finalUri = p.uri.startsWith('file://') ? p.uri : `file://${p.uri}`;
-        setShot({ uri: finalUri, base64: p.base64 });
+        const resized = await ImageManipulator.manipulateAsync(
+          p.uri,
+          [{ resize: { width: 480 } }],
+          { compress: 0.45, format: ImageManipulator.SaveFormat.JPEG, base64: true }
+        );
+        const finalUri = resized.uri.startsWith('file://') ? resized.uri : `file://${resized.uri}`;
+        setShot({ uri: finalUri, base64: resized.base64 });
       } else {
         setErr('Gagal merakam gambar. Sila cuba lagi.');
       }
